@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -12,7 +13,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -52,11 +55,11 @@ func main() {
 	}
 	docker := &http.Client{Timeout: 20 * time.Second}
 	a := &agent{cfg: cfg, control: control, docker: docker}
-	go a.worker()
-	http.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, 200, map[string]string{"status": "ok", "node_id": cfg.nodeID})
 	})
-	http.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		if err := a.publicHealth(r); err != nil {
 			writeJSON(w, 503, map[string]string{"status": "not_ready", "error": err.Error()})
 			return
@@ -64,11 +67,31 @@ func main() {
 		writeJSON(w, 200, map[string]string{"status": "ready", "node_id": cfg.nodeID})
 	})
 	port := getenv("AGENT_PORT", "8090")
+	server := &http.Server{Addr: ":" + port, Handler: mux}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go a.worker(ctx)
 	log.Printf("agent %s listening on :%s", cfg.nodeID, port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	serverErrors := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		log.Printf("agent %s shutting down", cfg.nodeID)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("agent shutdown: %v", err)
+		}
+	case err := <-serverErrors:
+		log.Fatal(err)
+	}
 }
 
-func (a *agent) worker() {
+func (a *agent) worker(ctx context.Context) {
 	heartbeat := time.NewTicker(10 * time.Second)
 	poll := time.NewTicker(2 * time.Second)
 	defer heartbeat.Stop()
@@ -82,6 +105,8 @@ func (a *agent) worker() {
 			if err := a.poll(); err != nil {
 				log.Printf("agent poll: %v", err)
 			}
+		case <-ctx.Done():
+			return
 		}
 	}
 }
