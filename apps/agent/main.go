@@ -186,10 +186,7 @@ func (a *agent) heartbeat() error {
 		if item.Health != nil && item.Health.Status != "" {
 			health = item.Health.Status
 		}
-		state := item.State
-		if state == "exited" {
-			state = "stopped"
-		}
+		state := normalizeObservedState(item.State)
 		instances = append(instances, observedInstance{InstanceID: instanceID, ContainerID: item.ID, ObservedState: state, Health: health})
 	}
 	body, err := json.Marshal(map[string]any{"instances": instances})
@@ -225,7 +222,28 @@ func (a *agent) heartbeat() error {
 			}
 		}
 	}
+	desiredIDs := make(map[string]struct{}, len(response.DesiredInstances))
+	for _, desired := range response.DesiredInstances {
+		desiredIDs[desired.InstanceID] = struct{}{}
+	}
+	for _, observed := range instances {
+		if _, ok := desiredIDs[observed.InstanceID]; ok || observed.ContainerID == "" {
+			continue
+		}
+		if err := a.dockerAction(http.MethodDelete, "/containers/"+observed.ContainerID+"?force=false", nil); err != nil {
+			return fmt.Errorf("remove deleted instance %q: %w", observed.InstanceID, err)
+		}
+	}
 	return nil
+}
+
+func normalizeObservedState(state string) string {
+	switch state {
+	case "created", "exited", "dead":
+		return "stopped"
+	default:
+		return state
+	}
 }
 
 func desiredReconcileAction(desiredState, observedState string) string {

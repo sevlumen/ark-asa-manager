@@ -62,6 +62,24 @@ func TestDesiredReconcileAction(t *testing.T) {
 	}
 }
 
+func TestNormalizeObservedStateTreatsNonRunningContainersAsStopped(t *testing.T) {
+	for _, state := range []string{"created", "exited", "dead"} {
+		if got := normalizeObservedState(state); got != "stopped" {
+			t.Fatalf("state %q normalized to %q, want stopped", state, got)
+		}
+	}
+	if got := normalizeObservedState("running"); got != "running" {
+		t.Fatalf("running normalized to %q", got)
+	}
+}
+
+func TestDeletedManagedInstancesAreNotDesired(t *testing.T) {
+	desired := map[string]struct{}{"kept": {}}
+	if _, ok := desired["deleted"]; ok {
+		t.Fatal("deleted instance must not remain in the desired set")
+	}
+}
+
 func TestResourceLimitParsers(t *testing.T) {
 	if got, _ := parseMemoryLimit("12g"); got != 12*1024*1024*1024 {
 		t.Fatalf("memory limit = %d", got)

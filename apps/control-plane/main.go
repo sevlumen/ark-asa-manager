@@ -132,6 +132,7 @@ func main() {
 			r.Get("/instances", s.instances)
 			r.Get("/instances/{id}", s.instance)
 			r.Patch("/instances/{id}", s.updateInstance)
+			r.Delete("/instances/{id}", s.deleteInstance)
 			r.Post("/instances", s.createInstance)
 			r.Post("/instances/{id}/actions/{action}", s.action)
 			r.Get("/backups", s.backups)
@@ -1280,6 +1281,34 @@ func (s *server) updateInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	s.recordAudit(r.Context(), p.Username, "instance.update", "instance:"+id, map[string]any{"outcome": "allowed"})
 	s.instance(w, r)
+}
+
+func (s *server) deleteInstance(w http.ResponseWriter, r *http.Request) {
+	p := currentPrincipal(r)
+	if p.Role == "viewer" {
+		s.denied(w, r, "instance.delete")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var observedState string
+	if err := s.db.QueryRow(r.Context(), `SELECT COALESCE((SELECT observed_state FROM instance_status WHERE instance_id=$1),'unknown') FROM instances WHERE id=$1`, id).Scan(&observedState); errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 404, "not_found", "instance not found")
+		return
+	} else if err != nil {
+		writeError(w, 500, "internal_error", "could not inspect instance")
+		return
+	}
+	if observedState != "stopped" {
+		writeError(w, 409, "conflict", "wait until the instance is observed stopped before deleting it")
+		return
+	}
+	if _, err := s.db.Exec(r.Context(), `DELETE FROM instances WHERE id=$1`, id); err != nil {
+		writeError(w, 500, "internal_error", "could not delete instance")
+		return
+	}
+	s.appendEvent(r.Context(), "instance.deleted", "instance", id, map[string]any{"instance_id": id})
+	s.recordAudit(r.Context(), p.Username, "instance.delete", "instance:"+id, map[string]any{"outcome": "allowed"})
+	w.WriteHeader(http.StatusNoContent)
 }
 func (s *server) action(w http.ResponseWriter, r *http.Request) {
 	p := currentPrincipal(r)

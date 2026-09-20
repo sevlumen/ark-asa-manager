@@ -243,6 +243,15 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Instance' }
         '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [instances]
+      operationId: deleteInstance
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204': { description: Instance deleted after the server is stopped. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Instance is not yet observed stopped. }
   /api/v1/instances/{id}/actions/{action}:
     parameters:
       - { $ref: '#/components/parameters/ResourceID' }

@@ -16,6 +16,11 @@ The web operations console is available at `http://127.0.0.1:3000`. Use it to
 review health, servers, jobs, audit records, nodes, and team access according
 to the signed-in role.
 
+The **Servers** page supports deleting a managed instance only after its agent
+reports `stopped`. Deletion removes the database record and platform-owned
+container on the next heartbeat, while the named persistence volumes remain
+available for recovery.
+
 With the stack running, verify the authenticated web surface and CSRF boundary
 without printing the bootstrap secret:
 
