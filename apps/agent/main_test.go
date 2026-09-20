@@ -45,6 +45,23 @@ func TestLifecycleActionPathRejectsUnsupportedActions(t *testing.T) {
 	}
 }
 
+func TestDesiredReconcileAction(t *testing.T) {
+	for _, test := range []struct {
+		desired, observed, want string
+	}{
+		{"running", "stopped", "start"},
+		{"running", "exited", "start"},
+		{"stopped", "running", "stop"},
+		{"running", "running", ""},
+		{"running", "unknown", ""},
+		{"stopped", "stopped", ""},
+	} {
+		if got := desiredReconcileAction(test.desired, test.observed); got != test.want {
+			t.Fatalf("desired=%q observed=%q => %q, want %q", test.desired, test.observed, got, test.want)
+		}
+	}
+}
+
 func TestValidBackupNameRejectsTraversal(t *testing.T) {
 	for _, name := range []string{"", "../save.tar.gz", "/tmp/save.tar.gz", "save.zip"} {
 		if validBackupName(name) {

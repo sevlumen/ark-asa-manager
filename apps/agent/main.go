@@ -52,6 +52,15 @@ type observedInstance struct {
 	Health        string `json:"health"`
 }
 
+type desiredInstance struct {
+	InstanceID   string `json:"instance_id"`
+	DesiredState string `json:"desired_state"`
+}
+
+type heartbeatResponse struct {
+	DesiredInstances []desiredInstance `json:"desired_instances"`
+}
+
 type backupResult struct {
 	ID        string `json:"id"`
 	ObjectKey string `json:"object_key"`
@@ -163,8 +172,40 @@ func (a *agent) heartbeat() error {
 	if err != nil {
 		return err
 	}
-	var out map[string]any
-	return a.controlJSON(http.MethodPost, "/internal/agent/heartbeat", bytes.NewReader(body), &out)
+	var response heartbeatResponse
+	if err := a.controlJSON(http.MethodPost, "/internal/agent/heartbeat", bytes.NewReader(body), &response); err != nil {
+		return err
+	}
+	byInstance := make(map[string]observedInstance, len(instances))
+	for _, instance := range instances {
+		byInstance[instance.InstanceID] = instance
+	}
+	for _, desired := range response.DesiredInstances {
+		observed, ok := byInstance[desired.InstanceID]
+		if !ok || observed.ContainerID == "" {
+			continue
+		}
+		if action := desiredReconcileAction(desired.DesiredState, observed.ObservedState); action != "" {
+			path, err := lifecycleActionPath(action, observed.ContainerID)
+			if err != nil {
+				return err
+			}
+			if err := a.dockerAction(http.MethodPost, path, nil); err != nil {
+				return fmt.Errorf("reconcile instance %q: %w", desired.InstanceID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func desiredReconcileAction(desiredState, observedState string) string {
+	if desiredState == "running" && observedState != "running" && observedState != "unknown" {
+		return "start"
+	}
+	if desiredState == "stopped" && observedState == "running" {
+		return "stop"
+	}
+	return ""
 }
 func (a *agent) poll() error {
 	var response job

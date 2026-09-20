@@ -490,7 +490,23 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 			s.appendEvent(r.Context(), "instance.status_changed", "instance", item.id, map[string]any{"observed_state": state, "health": health, "last_error": lastError})
 		}
 	}
-	writeJSON(w, 200, map[string]any{"node_id": nodeID, "status": "online", "observed_at": time.Now().UTC()})
+	desiredRows, err := s.db.Query(r.Context(), `SELECT id,desired_state FROM instances WHERE node_id=$1`, nodeID)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not read desired instance state")
+		return
+	}
+	desired := make([]map[string]string, 0)
+	for desiredRows.Next() {
+		var instanceID, desiredState string
+		if err := desiredRows.Scan(&instanceID, &desiredState); err != nil {
+			desiredRows.Close()
+			writeError(w, 500, "internal_error", "could not read desired instance state")
+			return
+		}
+		desired = append(desired, map[string]string{"instance_id": instanceID, "desired_state": desiredState})
+	}
+	desiredRows.Close()
+	writeJSON(w, 200, map[string]any{"node_id": nodeID, "status": "online", "observed_at": time.Now().UTC(), "desired_instances": desired})
 }
 
 func decodeHeartbeatPayload(reader io.Reader) (struct {
