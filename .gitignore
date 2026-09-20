@@ -20,3 +20,7 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
+.secrets/
+output/playwright/
+node_modules/
+.playwright-mcp/

@@ -48,6 +48,40 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Principal' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/status:
+    get:
+      tags: [auth]
+      operationId: authStatus
+      responses:
+        '200':
+          description: Whether the browser has a valid session.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authenticated]
+                properties:
+                  authenticated: { type: boolean }
+                  user: { $ref: '#/components/schemas/Principal' }
+  /api/v1/system/health:
+    get:
+      tags: [auth]
+      operationId: systemHealth
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Aggregated control-plane health.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, control_plane, database, observed_at]
+                properties:
+                  status: { type: string, enum: [healthy, critical] }
+                  control_plane: { type: string }
+                  database: { type: string }
+                  observed_at: { type: string, format: date-time }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/nodes:
     get:
       tags: [nodes]
@@ -200,6 +234,28 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Job' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/jobs:
+    get:
+      tags: [jobs]
+      operationId: listJobs
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Recent durable jobs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Job' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/audit:
     get:
       tags: [audit]
@@ -217,6 +273,42 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/AuditRecord' }
+  /api/v1/users:
+    get:
+      tags: [auth]
+      operationId: listUsers
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Administrators and operators.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/User' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [auth]
+      operationId: createUser
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password, role]
+              properties:
+                username: { type: string, minLength: 1 }
+                password: { type: string, minLength: 12, format: password }
+                role: { type: string, enum: [admin, operator, viewer] }
+      responses:
+        '201': { description: User created. }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/ws:
     get:
       tags: [instances]
@@ -287,6 +379,15 @@ components:
         capabilities:
           type: array
           items: { type: string }
+    User:
+      type: object
+      required: [id, username, role]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        role: { type: string, enum: [admin, operator, viewer] }
+        disabled_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
     Node:
       type: object
       required: [id, name, status, endpoint]

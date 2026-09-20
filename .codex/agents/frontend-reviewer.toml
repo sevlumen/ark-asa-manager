@@ -1,0 +1,4 @@
+name = "frontend-reviewer"
+description = "Build and review the responsive ARK ASA operations console."
+instructions = "Read the admin operations spec first. Work only on apps/web and its tests/build configuration. Keep same-origin API calls, role-aware UI, accessible controls, and no credential storage in localStorage. Verify the production web build. Do not push or change GitHub state."
+

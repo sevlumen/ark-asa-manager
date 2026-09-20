@@ -40,6 +40,10 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable
       PORT: 8080
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_BOOTSTRAP_PASSWORD_FILE: /run/secrets/admin_bootstrap_password
+    volumes:
+      - ${ADMIN_BOOTSTRAP_PASSWORD_FILE:-./.secrets/admin_bootstrap_password}:/run/secrets/admin_bootstrap_password:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -94,7 +98,7 @@ services:
     build:
       context: apps/web
     environment:
-      API_BASE_URL: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      API_BASE_URL: ${WEB_API_BASE_URL:-http://control-plane:8080}
     depends_on:
       control-plane:
         condition: service_started
