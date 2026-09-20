@@ -584,7 +584,7 @@ func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "internal_error", "could not read nodes")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": status, "last_heartbeat": heartbeat, "created_at": created})
+		items = append(items, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created})
 	}
 	next := ""
 	if len(items) > limit {
@@ -607,7 +607,7 @@ func (s *server) node(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not read node")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": status, "last_heartbeat": heartbeat, "created_at": created})
+	writeJSON(w, 200, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created})
 }
 
 func (s *server) createNode(w http.ResponseWriter, r *http.Request) {
@@ -648,6 +648,15 @@ func validRole(value string) bool {
 
 func currentUserRoleChangeAllowed(targetID, principalID, requestedRole, currentRole string) bool {
 	return targetID != principalID || requestedRole == currentRole
+}
+
+const heartbeatFreshness = 30 * time.Second
+
+func effectiveNodeStatus(status string, lastHeartbeat *time.Time, now time.Time) string {
+	if status == "online" && (lastHeartbeat == nil || now.Sub(*lastHeartbeat) > heartbeatFreshness) {
+		return "offline"
+	}
+	return status
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {

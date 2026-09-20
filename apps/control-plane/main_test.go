@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestPasswordHashRoundTrip(t *testing.T) {
 	hash, err := hashPassword("correct horse battery staple")
@@ -130,5 +133,20 @@ func TestUserUpdateRequiresSeparateAdministratorForRoleChanges(t *testing.T) {
 	}
 	if !currentUserRoleChangeAllowed("admin-1", "admin-2", "viewer", "admin") {
 		t.Fatal("role changes for another user should remain allowed")
+	}
+}
+
+func TestEffectiveNodeStatusMarksStaleHeartbeatOffline(t *testing.T) {
+	now := time.Date(2026, 9, 21, 3, 0, 0, 0, time.UTC)
+	fresh := now.Add(-heartbeatFreshness)
+	stale := now.Add(-heartbeatFreshness - time.Second)
+	if got := effectiveNodeStatus("online", &fresh, now); got != "online" {
+		t.Fatalf("fresh heartbeat status = %q, want online", got)
+	}
+	if got := effectiveNodeStatus("online", &stale, now); got != "offline" {
+		t.Fatalf("stale heartbeat status = %q, want offline", got)
+	}
+	if got := effectiveNodeStatus("unknown", nil, now); got != "unknown" {
+		t.Fatalf("unknown node status = %q, want unknown", got)
 	}
 }
