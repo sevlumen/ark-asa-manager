@@ -11,6 +11,7 @@ $webDockerfile = Get-Content (Join-Path $root 'apps\web\Dockerfile') -Raw
 $envExample = Get-Content (Join-Path $root '.env.example') -Raw
 $bootstrap = Get-Content (Join-Path $root 'scripts\bootstrap.sh') -Raw
 $bootstrapPs = Get-Content (Join-Path $root 'scripts\bootstrap.ps1') -Raw
+$tlsInit = Get-Content (Join-Path $root 'deploy\docker\tls-init\generate.sh') -Raw
 $failures = [System.Collections.Generic.List[string]]::new()
 
 function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
@@ -119,6 +120,11 @@ Assert-Contains $envExample 'PUBLIC_ORIGIN=http://localhost:3000' 'Environment e
 Assert-Contains $compose 'control-plane-enrollment-ca' 'Enrollment CA must use a dedicated Docker volume.'
 Assert-Contains $compose 'ENROLLMENT_CA_CERT_FILE' 'Control-plane enrollment signer certificate path is missing.'
 Assert-Contains $compose 'AGENT_ENROLLMENT_CA_FILE' 'Agent enrollment CA trust path is missing.'
+$copyEnrollmentCA = $tlsInit.IndexOf('cp "$enrollment_out/ca.pem" "$out/enrollment-ca.pem"')
+$lastTLSReset = $tlsInit.LastIndexOf('rm -f "$out"/*')
+if ($copyEnrollmentCA -lt 0 -or $copyEnrollmentCA -lt $lastTLSReset) {
+    $failures.Add('Fresh tls-init bootstrap must copy enrollment-ca.pem after clearing generated TLS files.')
+}
 
 if ($failures.Count -gt 0) {
     throw ($failures -join [Environment]::NewLine)
