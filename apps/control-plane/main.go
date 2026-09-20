@@ -34,9 +34,10 @@ type contextKey string
 const principalKey contextKey = "principal"
 
 type principal struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	ID           string   `json:"id"`
+	Username     string   `json:"username"`
+	Role         string   `json:"role"`
+	Capabilities []string `json:"capabilities"`
 }
 type server struct {
 	db       *pgxpool.Pool
@@ -95,7 +96,7 @@ func main() {
 			r.Get("/audit", s.audit)
 			r.Get("/ws", s.websocket)
 			r.Group(func(r chi.Router) {
-				r.Use(requireRole("admin"))
+				r.Use(s.requireRole("admin"))
 				r.Get("/users", s.users)
 				r.Post("/users", s.createUser)
 			})
@@ -191,6 +192,7 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 401, "unauthorized", "invalid credentials")
 		return
 	}
+	p.Capabilities = roleCapabilities(p.Role)
 	sessionID, err := randomID()
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not create session")
@@ -414,10 +416,12 @@ func (s *server) requireSession(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-func requireRole(role string) func(http.Handler) http.Handler {
+func (s *server) requireRole(role string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if currentPrincipal(r).Role != role {
+				p := currentPrincipal(r)
+				s.recordAudit(r.Context(), p.Username, "request.role_denied", r.URL.Path, map[string]any{"required_role": role, "outcome": "denied"})
 				writeError(w, 403, "forbidden", "insufficient role")
 				return
 			}
@@ -438,7 +442,19 @@ func (s *server) sessionPrincipal(r *http.Request) (principal, bool) {
 	var p principal
 	var expires time.Time
 	err = s.db.QueryRow(r.Context(), `SELECT u.id,u.username,u.role,se.expires_at FROM sessions se JOIN users u ON u.id=se.user_id WHERE se.id=$1 AND se.revoked_at IS NULL AND u.disabled_at IS NULL`, c.Value).Scan(&p.ID, &p.Username, &p.Role, &expires)
+	p.Capabilities = roleCapabilities(p.Role)
 	return p, err == nil && expires.After(time.Now())
+}
+
+func roleCapabilities(role string) []string {
+	capabilities := []string{"read:instances", "read:jobs", "read:audit"}
+	if role == "admin" || role == "operator" {
+		capabilities = append(capabilities, "write:instances", "write:jobs")
+	}
+	if role == "admin" {
+		capabilities = append(capabilities, "manage:users", "manage:nodes")
+	}
+	return capabilities
 }
 func currentPrincipal(r *http.Request) principal {
 	p, _ := r.Context().Value(principalKey).(principal)

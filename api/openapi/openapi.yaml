@@ -26,7 +26,7 @@ paths:
           description: Authenticated session created.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Principal' }
+              schema: { $ref: '#/components/schemas/AuthResponse' }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/auth/logout:
     post:
@@ -34,7 +34,7 @@ paths:
       operationId: logout
       security: [{ sessionCookie: [] }]
       responses:
-        '204': { description: Session revoked. }
+        '200': { description: Session revoked. }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/me:
     get:
@@ -46,7 +46,11 @@ paths:
           description: Current principal and capabilities.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Principal' }
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: '#/components/schemas/Principal' }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/auth/status:
     get:
@@ -369,6 +373,12 @@ components:
         username: { type: string, minLength: 1 }
         password: { type: string, minLength: 1, format: password }
         csrf_token: { type: string }
+    AuthResponse:
+      type: object
+      required: [user, expires_at]
+      properties:
+        user: { $ref: '#/components/schemas/Principal' }
+        expires_at: { type: string, format: date-time }
     Principal:
       type: object
       required: [id, username, role, capabilities]
