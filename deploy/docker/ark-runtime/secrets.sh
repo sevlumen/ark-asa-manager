@@ -20,3 +20,15 @@ read_secret_file() {
   value="${value%$'\r'}"
   printf '%s' "$value"
 }
+
+redact_stream() {
+  local line
+  local secret
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    for secret in "${secret_values[@]-}"; do
+      [[ -z "$secret" ]] || line="${line//"$secret"/[REDACTED]}"
+    done
+    printf '%s\n' "$line"
+  done
+}

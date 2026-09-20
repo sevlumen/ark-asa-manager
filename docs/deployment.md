@@ -20,6 +20,21 @@ the host with `scripts/install-arkctl.sh`, then use `.bin/arkctl status` or
 The host must provide `/var/run/docker.sock`. The agent receives only the
 allow-listed read-only Docker API exposed by `socket-proxy`.
 
+For RCON, create a host-side secret file and run with the RCON override:
+
+```bash
+mkdir -p secrets
+printf '%s\n' 'replace-with-a-long-admin-password' > secrets/ark_admin_password
+chmod 600 secrets/ark_admin_password
+ARK_ADMIN_PASSWORD_SECRET_FILE="$PWD/secrets/ark_admin_password" \\
+  docker compose -f compose.yml -f compose.rcon.yml --profile ark up -d ark
+```
+
+For both admin and server passwords, copy `compose.secrets.yml.example` to
+`compose.secrets.yml`, set the two `*_SECRET_FILE` variables, and keep those
+files outside Git. The base Compose file does not publish RCON and does not
+require a password file.
+
 ## WSL2 / Docker Desktop
 
 Docker Desktop must be running with the Linux engine enabled. Run commands from

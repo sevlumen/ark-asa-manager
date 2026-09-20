@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $compose = Get-Content (Join-Path $root 'compose.yml') -Raw
 $rconCompose = Get-Content (Join-Path $root 'compose.rcon.yml') -Raw
+$secretCompose = Get-Content (Join-Path $root 'compose.secrets.yml.example') -Raw
 $runtimeEnv = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\runtime.env.example') -Raw
 $entrypoint = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\entrypoint.sh') -Raw
 $secrets = Join-Path $root 'deploy\docker\ark-runtime\secrets.sh'
@@ -32,6 +33,10 @@ Assert-NotContains $compose 'ARK_ADMIN_PASSWORD: ${ARK_ADMIN_PASSWORD:-' 'Compos
 Assert-NotContains $compose 'ARK_RCON_PORT:-32330}:${ARK_RCON_PORT:-32330}/tcp' 'Base Compose must not publish RCON unconditionally.'
 Assert-Contains $rconCompose 'ARK_RCON_ENABLED: "true"' 'RCON override must enable RCON explicitly.'
 Assert-Contains $rconCompose 'ARK_RCON_PORT:-32330}:${ARK_RCON_PORT:-32330}/tcp' 'RCON override must publish the configured RCON port.'
+Assert-Contains $rconCompose 'target: /run/secrets/ark_admin_password' 'RCON override must mount the admin secret into the container.'
+Assert-Contains $rconCompose 'read_only: true' 'RCON override must mount the admin secret read-only.'
+Assert-Contains $secretCompose 'ARK_SERVER_PASSWORD_SECRET_FILE' 'Secret override must support the optional server password file.'
+Assert-Contains $secretCompose 'target: /run/secrets/ark_server_password' 'Secret override must mount the server secret into the container.'
 
 Assert-Contains $runtimeEnv 'ARK_RCON_ENABLED=false' 'Runtime example must default RCON to disabled explicitly.'
 Assert-Contains $runtimeEnv 'ARK_ADMIN_PASSWORD_FILE=' 'Runtime example must document the admin password file.'
@@ -45,6 +50,15 @@ Assert-Contains $entrypoint 'RCONEnabled=' 'Entrypoint must derive RCONEnabled f
 Assert-Contains $entrypoint 'redact_stream' 'Runtime output must redact loaded secret values.'
 Assert-NotContains $entrypoint 'ServerPassword=${ARK_SERVER_PASSWORD:-}' 'Entrypoint must not use a plaintext server password fallback.'
 Assert-NotContains $entrypoint '?RCONEnabled=True?RCONPort=' 'Entrypoint must not force-enable RCON.'
+
+$image = 'ark-asa-runtime:local'
+if (docker image inspect $image 2>$null) {
+    $probe = 'source /usr/local/bin/secrets.sh; secret_values=(fake-runtime-secret); printf "password=fake-runtime-secret\n" | redact_stream'
+    $redacted = docker run --rm --entrypoint bash $image -c $probe
+    if ($LASTEXITCODE -ne 0 -or $redacted -match 'fake-runtime-secret' -or $redacted -notmatch '\[REDACTED\]') {
+        $failures.Add('Runtime image redaction probe must hide fake secret values.')
+    }
+}
 
 if ($failures.Count -gt 0) {
     throw ($failures -join [Environment]::NewLine)

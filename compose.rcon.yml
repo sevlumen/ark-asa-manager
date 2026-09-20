@@ -2,5 +2,11 @@ services:
   ark:
     environment:
       ARK_RCON_ENABLED: "true"
+      ARK_ADMIN_PASSWORD_FILE: /run/secrets/ark_admin_password
+    volumes:
+      - type: bind
+        source: ${ARK_ADMIN_PASSWORD_SECRET_FILE:-./secrets/ark_admin_password}
+        target: /run/secrets/ark_admin_password
+        read_only: true
     ports:
       - "${ARK_RCON_PORT:-32330}:${ARK_RCON_PORT:-32330}/tcp"

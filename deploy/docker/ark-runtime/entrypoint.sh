@@ -47,18 +47,6 @@ if [[ -n "${STEAM_PASSWORD:-}" ]]; then
   secret_values+=("$STEAM_PASSWORD")
 fi
 
-redact_stream() {
-  local line
-  local secret
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    for secret in "${secret_values[@]}"; do
-      [[ -z "$secret" ]] || line="${line//"$secret"/[REDACTED]}"
-    done
-    printf '%s\n' "$line"
-  done
-}
-
 mkdir -p "$data_root"/{save,config,log,backups,cluster}
 rm -f "$ready_marker"
 : > "$server_log"
