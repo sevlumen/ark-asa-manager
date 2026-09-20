@@ -341,6 +341,9 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "invalid heartbeat payload")
 		return
 	}
+	observed := make(map[string]struct {
+		containerID, state, health string
+	})
 	for _, instance := range input.Instances {
 		if instance.InstanceID == "" {
 			continue
@@ -351,10 +354,46 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		if instance.Health == "" {
 			instance.Health = "unknown"
 		}
-		_, err := s.db.Exec(r.Context(), `UPDATE instance_status st SET observed_state=$2,container_id=$3,health=$4,last_error=NULL,observed_at=now() FROM instances i WHERE st.instance_id=i.id AND i.node_id=$5 AND st.instance_id=$1`, instance.InstanceID, instance.ObservedState, instance.ContainerID, instance.Health, nodeID)
+		observed[instance.InstanceID] = struct{ containerID, state, health string }{instance.ContainerID, instance.ObservedState, instance.Health}
+	}
+	rows, err := s.db.Query(r.Context(), `SELECT i.id,COALESCE(st.observed_state,'unknown'),COALESCE(st.health,'unknown'),st.last_error FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id WHERE i.node_id=$1`, nodeID)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not read instance heartbeat state")
+		return
+	}
+	type previousStatus struct {
+		id, state, health string
+		lastError         *string
+	}
+	previous := make([]previousStatus, 0)
+	for rows.Next() {
+		var item previousStatus
+		if err := rows.Scan(&item.id, &item.state, &item.health, &item.lastError); err != nil {
+			rows.Close()
+			writeError(w, 500, "internal_error", "could not read instance heartbeat state")
+			return
+		}
+		previous = append(previous, item)
+	}
+	rows.Close()
+	for _, item := range previous {
+		current, ok := observed[item.id]
+		state, health, containerID := "unknown", "unknown", ""
+		var lastError *string
+		if ok {
+			state, health, containerID = current.state, current.health, current.containerID
+		} else {
+			missing := "managed container not found"
+			lastError = &missing
+		}
+		changed := item.state != state || item.health != health || (item.lastError == nil) != (lastError == nil)
+		_, err := s.db.Exec(r.Context(), `INSERT INTO instance_status (instance_id,observed_state,container_id,health,last_error,observed_at) VALUES ($1,$2,$3,$4,$5,now()) ON CONFLICT (instance_id) DO UPDATE SET observed_state=EXCLUDED.observed_state,container_id=EXCLUDED.container_id,health=EXCLUDED.health,last_error=EXCLUDED.last_error,observed_at=now()`, item.id, state, containerID, health, lastError)
 		if err != nil {
 			writeError(w, 500, "internal_error", "could not update instance heartbeat")
 			return
+		}
+		if changed {
+			s.appendEvent(r.Context(), "instance.status_changed", "instance", item.id, map[string]any{"observed_state": state, "health": health, "last_error": lastError})
 		}
 	}
 	writeJSON(w, 200, map[string]any{"node_id": nodeID, "status": "online", "observed_at": time.Now().UTC()})
