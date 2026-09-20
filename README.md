@@ -26,6 +26,11 @@ docker compose ps
 curl http://localhost:8080/healthz
 ```
 
+Open the operations console at <http://localhost:3000>. After signing in, the
+admin can review the dashboard, servers, jobs, audit trail, nodes, and team
+access pages. The API remains available at `http://localhost:8080` for local
+diagnostics.
+
 To start the ARK runtime, set Steam credentials and run:
 
 ```bash
@@ -41,9 +46,24 @@ before the ARK service is considered healthy.
 ## Local development
 
 ```bash
-go test ./...
+make test
 docker compose config
 docker compose build control-plane agent ark
+```
+
+The repository contains multiple Go modules, so `go test ./...` from the
+repository root is not the supported test command. `make test` runs the agent,
+control-plane, CLI, and OpenAPI contract suites.
+
+On Windows/PowerShell, use `powershell -ExecutionPolicy Bypass -File
+scripts/test.ps1` for the same Go and web checks.
+
+The CLI supports safe local operations:
+
+```bash
+arkctl backup
+arkctl verify ark-save-<timestamp>.tar.gz
+arkctl restore ark-save-<timestamp>.tar.gz  # requires the ARK instance stopped
 ```
 
 The production checklist and recovery procedures are in [`docs/deployment.md`](docs/deployment.md).

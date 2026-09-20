@@ -12,13 +12,18 @@ curl --fail http://127.0.0.1:8080/healthz
 curl --fail http://127.0.0.1:8080/readyz
 ```
 
+The web operations console is available at `http://127.0.0.1:3000`. Use it to
+review health, servers, jobs, audit records, nodes, and team access according
+to the signed-in role.
+
 For a fresh Ubuntu or Ubuntu-WSL node, `scripts/bootstrap.sh` performs the same
 checks and starts the stack. Build the management CLI without installing Go on
 the host with `scripts/install-arkctl.sh`, then use `.bin/arkctl status` or
 `.bin/arkctl start` from the repository root.
 
 The host must provide `/var/run/docker.sock`. The agent receives only the
-allow-listed read-only Docker API exposed by `socket-proxy`.
+restricted, allow-listed Docker API exposed by `socket-proxy`; it is not given
+an unrestricted Docker socket.
 
 For RCON, create a host-side secret file and run with the RCON override:
 
