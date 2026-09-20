@@ -165,6 +165,18 @@ func TestEffectiveNodeStatusMarksStaleHeartbeatOffline(t *testing.T) {
 	}
 }
 
+func TestOverallHealthStatusEscalatesQueryFailures(t *testing.T) {
+	if got := overallHealthStatus("healthy", "healthy", false); got != "healthy" {
+		t.Fatalf("healthy components = %q, want healthy", got)
+	}
+	if got := overallHealthStatus("degraded", "healthy", false); got != "degraded" {
+		t.Fatalf("degraded agent = %q, want degraded", got)
+	}
+	if got := overallHealthStatus("healthy", "healthy", true); got != "critical" {
+		t.Fatalf("failed health query = %q, want critical", got)
+	}
+}
+
 func TestBuildActionPayloadPreservesBackupID(t *testing.T) {
 	payload, err := buildActionPayload("restore", "backup-123")
 	if err != nil || payload["action"] != "restore" || payload["backup_id"] != "backup-123" {

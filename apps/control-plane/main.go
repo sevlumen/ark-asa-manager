@@ -492,30 +492,36 @@ func (s *server) systemHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agentStatus := "unknown"
+	queryFailed := false
 	var online int
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM nodes WHERE status='online' AND last_heartbeat > now() - interval '30 seconds'`).Scan(&online)
-	if online > 0 {
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM nodes WHERE status='online' AND last_heartbeat > now() - interval '30 seconds'`).Scan(&online); err != nil {
+		queryFailed = true
+	} else if online > 0 {
 		agentStatus = "healthy"
 	} else {
 		var nodes int
-		_ = s.db.QueryRow(ctx, `SELECT count(*) FROM nodes`).Scan(&nodes)
-		if nodes > 0 {
+		if err := s.db.QueryRow(ctx, `SELECT count(*) FROM nodes`).Scan(&nodes); err != nil {
+			queryFailed = true
+		} else if nodes > 0 {
 			agentStatus = "degraded"
 		}
 	}
 	arkStatus := "unknown"
 	var instances, unhealthy int
-	if err := s.db.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE COALESCE(st.health,'unknown') <> 'healthy') FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id`).Scan(&instances, &unhealthy); err == nil && instances > 0 {
+	if err := s.db.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE COALESCE(st.health,'unknown') <> 'healthy') FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id`).Scan(&instances, &unhealthy); err != nil {
+		queryFailed = true
+	} else if instances > 0 {
 		arkStatus = "healthy"
 		if unhealthy > 0 {
 			arkStatus = "degraded"
 		}
 	}
-	status := "healthy"
-	if agentStatus != "healthy" || (instances > 0 && arkStatus != "healthy") {
-		status = "degraded"
+	status := overallHealthStatus(agentStatus, arkStatus, queryFailed)
+	controlPlaneStatus := "healthy"
+	if queryFailed {
+		controlPlaneStatus = "degraded"
 	}
-	writeJSON(w, 200, map[string]any{"status": status, "control_plane": "healthy", "database": "healthy", "agent": agentStatus, "ark": arkStatus, "observed_at": time.Now().UTC()})
+	writeJSON(w, 200, map[string]any{"status": status, "control_plane": controlPlaneStatus, "database": "healthy", "agent": agentStatus, "ark": arkStatus, "observed_at": time.Now().UTC()})
 }
 
 func requestIP(r *http.Request) string {
@@ -698,6 +704,16 @@ func effectiveNodeStatus(status string, lastHeartbeat *time.Time, now time.Time)
 		return "offline"
 	}
 	return status
+}
+
+func overallHealthStatus(agentStatus, arkStatus string, queryFailed bool) string {
+	if queryFailed {
+		return "critical"
+	}
+	if agentStatus != "healthy" || (arkStatus != "unknown" && arkStatus != "healthy") {
+		return "degraded"
+	}
+	return "healthy"
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
@@ -1357,11 +1373,15 @@ func (s *server) websocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) appendEvent(ctx context.Context, eventType, resourceType, resourceID string, payload map[string]any) {
 	body, _ := json.Marshal(payload)
-	_, _ = s.db.Exec(ctx, `INSERT INTO event_cursor (event_type,resource_type,resource_id,payload) VALUES ($1,$2,$3,$4)`, eventType, resourceType, resourceID, body)
+	if _, err := s.db.Exec(ctx, `INSERT INTO event_cursor (event_type,resource_type,resource_id,payload) VALUES ($1,$2,$3,$4)`, eventType, resourceType, resourceID, body); err != nil {
+		log.Printf("append event %s/%s: %v", eventType, resourceID, err)
+	}
 }
 func (s *server) recordAudit(ctx context.Context, actor, action, resource string, metadata map[string]any) {
 	body, _ := json.Marshal(metadata)
-	_, _ = s.db.Exec(ctx, `INSERT INTO audit_log (actor,action,resource,metadata) VALUES ($1,$2,$3,$4)`, actor, action, resource, body)
+	if _, err := s.db.Exec(ctx, `INSERT INTO audit_log (actor,action,resource,metadata) VALUES ($1,$2,$3,$4)`, actor, action, resource, body); err != nil {
+		log.Printf("record audit %s/%s: %v", action, resource, err)
+	}
 }
 func hashPassword(password string) (string, error) {
 	salt := make([]byte, 16)
