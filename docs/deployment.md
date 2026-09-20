@@ -43,6 +43,12 @@ run:
 powershell -ExecutionPolicy Bypass -File tests/acceptance/node_enrollment.ps1
 ```
 
+To verify safe offboarding of an unused offline node, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/acceptance/node_delete.ps1
+```
+
 To verify viewer/operator permissions and denied-action auditing with temporary
 accounts, run:
 

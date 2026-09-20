@@ -33,6 +33,7 @@ func TestOpenAPIContractHasRequiredOperations(t *testing.T) {
 		"GET /api/v1/nodes":                            "list nodes",
 		"POST /api/v1/nodes":                           "create node",
 		"GET /api/v1/nodes/{id}":                       "node detail",
+		"DELETE /api/v1/nodes/{id}":                    "delete node",
 		"GET /api/v1/instances":                        "list instances",
 		"POST /api/v1/instances":                       "create instance",
 		"GET /api/v1/instances/{id}":                   "instance detail",

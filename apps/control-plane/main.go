@@ -144,6 +144,7 @@ func main() {
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireRole("admin"))
 				r.Post("/nodes", s.createNode)
+				r.Delete("/nodes/{id}", s.deleteNode)
 				r.Get("/users", s.users)
 				r.Post("/users", s.createUser)
 				r.Patch("/users/{id}", s.updateUser)
@@ -881,6 +882,37 @@ func (s *server) createNode(w http.ResponseWriter, r *http.Request) {
 	p := currentPrincipal(r)
 	s.recordAudit(r.Context(), p.Username, "node.create", "node:"+id, map[string]any{"outcome": "allowed"})
 	writeJSON(w, 201, map[string]any{"id": id, "name": input.Name, "endpoint": input.Endpoint, "status": "unknown", "last_heartbeat": nil, "enrollment_token": enrollmentToken, "enrollment_expires_at": expiresAt})
+}
+
+func (s *server) deleteNode(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var status string
+	var heartbeat *time.Time
+	var instances int
+	err := s.db.QueryRow(r.Context(), `SELECT n.status,n.last_heartbeat,(SELECT count(*) FROM instances i WHERE i.node_id=n.id) FROM nodes n WHERE n.id=$1`, id).Scan(&status, &heartbeat, &instances)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 404, "not_found", "node not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not inspect node")
+		return
+	}
+	if instances > 0 {
+		writeError(w, 409, "conflict", "remove or reassign all instances before deleting the node")
+		return
+	}
+	if effectiveNodeStatus(status, heartbeat, time.Now()) == "online" {
+		writeError(w, 409, "conflict", "wait until the node is offline before deleting it")
+		return
+	}
+	if _, err = s.db.Exec(r.Context(), `DELETE FROM nodes WHERE id=$1`, id); err != nil {
+		writeError(w, 500, "internal_error", "could not delete node")
+		return
+	}
+	p := currentPrincipal(r)
+	s.recordAudit(r.Context(), p.Username, "node.delete", "node:"+id, map[string]any{"outcome": "allowed"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) agentEnroll(w http.ResponseWriter, r *http.Request) {

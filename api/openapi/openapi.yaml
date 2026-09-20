@@ -170,6 +170,15 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Node' }
         '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [nodes]
+      operationId: deleteNode
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204': { description: Offline node deleted. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Node is online or still owns instances. }
   /api/v1/instances:
     get:
       tags: [instances]
@@ -443,7 +452,6 @@ paths:
         '400': { description: Invalid user update request. }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: Unsafe account state transition. }
   /api/v1/ws:
     get:
       tags: [instances]
