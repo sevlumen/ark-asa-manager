@@ -57,8 +57,10 @@ RUN dpkg --add-architecture i386 \
 
 COPY --from=runtime-bundle --chown=ark:ark /opt/ark /opt/ark
 COPY --chown=ark:ark deploy/docker/ark-runtime/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=ark:ark deploy/docker/ark-runtime/secrets.sh /usr/local/bin/secrets.sh
 COPY --chown=ark:ark deploy/docker/ark-runtime/healthcheck.sh /usr/local/bin/healthcheck.sh
-RUN chmod 0755 /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh /usr/local/bin/secrets.sh /usr/local/bin/healthcheck.sh \
+    && chmod 0755 /usr/local/bin/entrypoint.sh /usr/local/bin/secrets.sh /usr/local/bin/healthcheck.sh
 
 USER ark
 WORKDIR /opt/ark

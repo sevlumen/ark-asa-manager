@@ -1,0 +1,53 @@
+$ErrorActionPreference = 'Stop'
+
+$root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+$compose = Get-Content (Join-Path $root 'compose.yml') -Raw
+$rconCompose = Get-Content (Join-Path $root 'compose.rcon.yml') -Raw
+$runtimeEnv = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\runtime.env.example') -Raw
+$entrypoint = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\entrypoint.sh') -Raw
+$secrets = Join-Path $root 'deploy\docker\ark-runtime\secrets.sh'
+$failures = [System.Collections.Generic.List[string]]::new()
+
+function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
+    if (-not $Text.Contains($Needle)) { $failures.Add($Message) }
+}
+
+function Assert-NotContains([string]$Text, [string]$Needle, [string]$Message) {
+    if ($Text.Contains($Needle)) { $failures.Add($Message) }
+}
+
+if (-not (Test-Path $secrets)) {
+    $failures.Add('Runtime secret reader is missing.')
+} else {
+    $secretReader = Get-Content $secrets -Raw
+    Assert-Contains $secretReader 'read_secret_file' 'Runtime secret reader must expose read_secret_file.'
+    Assert-Contains $secretReader 'file is missing' 'Missing secret files must fail with a non-secret diagnostic.'
+    Assert-NotContains $secretReader 'printf.*secret' 'Secret reader must not print secret values.'
+}
+
+Assert-Contains $compose 'ARK_RCON_ENABLED' 'Compose must make RCON enablement explicit.'
+Assert-Contains $compose 'ARK_ADMIN_PASSWORD_FILE' 'Compose must pass the admin password file path.'
+Assert-Contains $compose 'ARK_SERVER_PASSWORD_FILE' 'Compose must pass the optional server password file path.'
+Assert-NotContains $compose 'ARK_ADMIN_PASSWORD: ${ARK_ADMIN_PASSWORD:-' 'Compose must not provide a plaintext admin password default.'
+Assert-NotContains $compose 'ARK_RCON_PORT:-32330}:${ARK_RCON_PORT:-32330}/tcp' 'Base Compose must not publish RCON unconditionally.'
+Assert-Contains $rconCompose 'ARK_RCON_ENABLED: "true"' 'RCON override must enable RCON explicitly.'
+Assert-Contains $rconCompose 'ARK_RCON_PORT:-32330}:${ARK_RCON_PORT:-32330}/tcp' 'RCON override must publish only the RCON port.'
+
+Assert-Contains $runtimeEnv 'ARK_RCON_ENABLED=false' 'Runtime example must default RCON to disabled explicitly.'
+Assert-Contains $runtimeEnv 'ARK_ADMIN_PASSWORD_FILE=' 'Runtime example must document the admin password file.'
+Assert-Contains $runtimeEnv 'ARK_SERVER_PASSWORD_FILE=' 'Runtime example must document the optional server password file.'
+Assert-NotContains $runtimeEnv 'ARK_ADMIN_PASSWORD=change-admin-password' 'Runtime example must not contain a plaintext admin password.'
+
+Assert-Contains $entrypoint 'ARK_ADMIN_PASSWORD_FILE' 'Entrypoint must read the admin password from a file.'
+Assert-Contains $entrypoint 'ARK_SERVER_PASSWORD_FILE' 'Entrypoint must read the server password from a file.'
+Assert-Contains $entrypoint 'ServerAdminPassword=' 'Entrypoint must pass ServerAdminPassword to ASA.'
+Assert-Contains $entrypoint 'RCONEnabled=' 'Entrypoint must derive RCONEnabled from explicit configuration.'
+Assert-Contains $entrypoint 'redact_stream' 'Runtime output must redact loaded secret values.'
+Assert-NotContains $entrypoint 'ServerPassword=${ARK_SERVER_PASSWORD:-}' 'Entrypoint must not use a plaintext server password fallback.'
+Assert-NotContains $entrypoint '?RCONEnabled=True?RCONPort=' 'Entrypoint must not force-enable RCON.'
+
+if ($failures.Count -gt 0) {
+    throw ($failures -join [Environment]::NewLine)
+}
+
+Write-Output 'runtime secrets contract: PASS'
