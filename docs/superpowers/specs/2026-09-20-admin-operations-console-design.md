@@ -114,6 +114,13 @@ executes the requested lifecycle operation and reports the result.
 If the ARK container is absent, the job fails with a visible error rather than
 pretending the action succeeded.
 
+In the local Compose profile, the private listener is reachable only on the
+Compose network. For multi-node deployments, the same listener is bound to a
+dedicated LAN/VPN address reachable by enrolled agents over outbound mTLS;
+firewall rules allow only the agent network, and the public reverse proxy never
+forwards `/internal/*`. This preserves private ingress locally without making
+the V1 multi-node transport depend on host-local routing.
+
 ## Web experience
 
 The app will become a responsive dark operations console:
