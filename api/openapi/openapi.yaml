@@ -1,0 +1,372 @@
+openapi: 3.0.3
+info:
+  title: ARK ASA Platform API
+  version: 1.0.0
+  description: Control-plane API for Docker-managed ARK ASA instances.
+servers:
+  - url: /
+tags:
+  - name: auth
+  - name: nodes
+  - name: instances
+  - name: jobs
+  - name: audit
+paths:
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Authenticated session created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Principal' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204': { description: Session revoked. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/me:
+    get:
+      tags: [auth]
+      operationId: currentPrincipal
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Current principal and capabilities.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Principal' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/nodes:
+    get:
+      tags: [nodes]
+      operationId: listNodes
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Registered nodes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Node' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [nodes]
+      operationId: createNode
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateNodeRequest' }
+      responses:
+        '201':
+          description: Node enrollment created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Node' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/nodes/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/ResourceID' }
+    get:
+      tags: [nodes]
+      operationId: getNode
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Node details.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Node' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/instances:
+    get:
+      tags: [instances]
+      operationId: listInstances
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: ARK instances.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, count]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Instance' }
+                  count: { type: integer, format: int32, minimum: 0 }
+    post:
+      tags: [instances]
+      operationId: createInstance
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateInstanceRequest' }
+      responses:
+        '201':
+          description: Instance desired state created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/instances/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/ResourceID' }
+    get:
+      tags: [instances]
+      operationId: getInstance
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Instance details.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [instances]
+      operationId: updateInstance
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateInstanceRequest' }
+      responses:
+        '200':
+          description: Updated instance.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Instance' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/instances/{id}/actions/{action}:
+    parameters:
+      - { $ref: '#/components/parameters/ResourceID' }
+      - name: action
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [start, stop, restart, update, backup, restore]
+    post:
+      tags: [instances]
+      operationId: instanceAction
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActionRequest' }
+      responses:
+        '202':
+          description: Durable job accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/jobs/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/ResourceID' }
+    get:
+      tags: [jobs]
+      operationId: getJob
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Job state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/audit:
+    get:
+      tags: [audit]
+      operationId: listAudit
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200':
+          description: Audit records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/AuditRecord' }
+  /api/v1/ws:
+    get:
+      tags: [instances]
+      operationId: eventsWebSocket
+      x-websocket: true
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: integer, format: int64, minimum: 0 }
+      responses:
+        '101': { description: WebSocket protocol switch. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: ark_session
+    bearerToken:
+      type: http
+      scheme: bearer
+  parameters:
+    ResourceID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+  responses:
+    Unauthorized:
+      description: Authentication required.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Principal is not allowed to perform this action.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        request_id: { type: string }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1 }
+        password: { type: string, minLength: 1, format: password }
+        csrf_token: { type: string }
+    Principal:
+      type: object
+      required: [id, username, role, capabilities]
+      properties:
+        id: { type: string }
+        username: { type: string }
+        role: { type: string, enum: [admin, operator, viewer] }
+        capabilities:
+          type: array
+          items: { type: string }
+    Node:
+      type: object
+      required: [id, name, status, endpoint]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        endpoint: { type: string, format: uri }
+        status: { type: string, enum: [unknown, online, offline, degraded] }
+        last_heartbeat: { type: string, format: date-time, nullable: true }
+    CreateNodeRequest:
+      type: object
+      required: [name, endpoint]
+      properties:
+        name: { type: string }
+        endpoint: { type: string, format: uri }
+    StorageSpec:
+      type: object
+      required: [mode, save_path, config_path, log_path, backup_path, cluster_path]
+      properties:
+        mode: { type: string, enum: [volume, bind, nfs] }
+        save_path: { type: string }
+        config_path: { type: string }
+        log_path: { type: string }
+        backup_path: { type: string }
+        cluster_path: { type: string }
+    Instance:
+      type: object
+      required: [id, node_id, map, cluster_id, desired_state, observed_state, ports, storage]
+      properties:
+        id: { type: string }
+        node_id: { type: string }
+        map: { type: string, default: TheIsland_WP }
+        cluster_id: { type: string }
+        desired_state: { type: string, enum: [running, stopped] }
+        observed_state: { type: string, enum: [unknown, creating, running, stopped, failed, updating] }
+        ports:
+          type: object
+          required: [game, query, rcon]
+          properties:
+            game: { type: integer, minimum: 1, maximum: 65535 }
+            query: { type: integer, minimum: 1, maximum: 65535 }
+            rcon: { type: integer, minimum: 1, maximum: 65535 }
+        storage: { $ref: '#/components/schemas/StorageSpec' }
+    CreateInstanceRequest:
+      type: object
+      required: [id, node_id, cluster_id]
+      properties:
+        id: { type: string }
+        node_id: { type: string }
+        map: { type: string, default: TheIsland_WP }
+        cluster_id: { type: string }
+        player_limit: { type: integer, minimum: 1, maximum: 100 }
+        desired_state: { type: string, enum: [running, stopped], default: stopped }
+    UpdateInstanceRequest:
+      type: object
+      properties:
+        desired_state: { type: string, enum: [running, stopped] }
+        player_limit: { type: integer, minimum: 1, maximum: 100 }
+        server_name: { type: string }
+    ActionRequest:
+      type: object
+      properties:
+        backup_id: { type: string }
+    Job:
+      type: object
+      required: [id, kind, status, created_at]
+      properties:
+        id: { type: string }
+        kind: { type: string }
+        status: { type: string, enum: [queued, leased, running, succeeded, failed, cancelled] }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        error: { type: string, nullable: true }
+    AuditRecord:
+      type: object
+      required: [id, actor, action, resource, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        actor: { type: string }
+        action: { type: string }
+        resource: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }

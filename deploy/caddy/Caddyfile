@@ -1,0 +1,13 @@
+https://localhost {
+    tls internal
+    encode gzip
+    handle /api/* {
+        reverse_proxy control-plane:8080
+    }
+    handle /healthz {
+        reverse_proxy control-plane:8080
+    }
+    handle {
+        reverse_proxy web:3000
+    }
+}

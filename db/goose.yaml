@@ -1,0 +1,3 @@
+database: postgres
+dir: db/migrations
+no-versioning: false

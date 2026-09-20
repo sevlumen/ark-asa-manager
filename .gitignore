@@ -1,0 +1,21 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Downloaded installers and runtime caches
+.cache/
+.bin/
+
+# Local build and runtime output
+bin/
+dist/
+build/
+coverage/
+*.log
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,224 @@
+name: ark-asa-platform
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ark}
+      POSTGRES_USER: ${POSTGRES_USER:-ark}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/docker/migrate/Dockerfile
+    image: ark-asa-migrate:local
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable
+    command: ["-dir", "/migrations", "postgres", "postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable", "up"]
+    volumes:
+      - ./db/migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  control-plane:
+    build:
+      context: .
+      dockerfile: apps/control-plane/Dockerfile
+    image: ${CONTROL_PLANE_IMAGE:-ark-asa-control-plane:local}
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable
+      PORT: 8080
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/control-plane", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    ports:
+      - "${CONTROL_PLANE_PORT:-8080}:8080"
+    restart: unless-stopped
+
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      CONTAINERS: 1
+      EVENTS: 1
+      IMAGES: 1
+      INFO: 1
+      POST: 0
+      NETWORKS: 0
+      VOLUMES: 0
+      EXEC: 0
+      BUILD: 0
+      AUTH: 0
+      SECRETS: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: .
+      dockerfile: apps/agent/Dockerfile
+    image: ${AGENT_IMAGE:-ark-asa-agent:local}
+    environment:
+      CONTROL_PLANE_URL: http://control-plane:8080
+      NODE_ID: ${NODE_ID:-local-node}
+      AGENT_PORT: 8090
+      DOCKER_HOST: tcp://socket-proxy:2375
+    depends_on:
+      control-plane:
+        condition: service_started
+      socket-proxy:
+        condition: service_started
+    ports:
+      - "${AGENT_PORT:-8090}:8090"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: apps/web
+    environment:
+      API_BASE_URL: ${PUBLIC_ORIGIN:-http://localhost:8080}
+    depends_on:
+      control-plane:
+        condition: service_started
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  ark-permissions:
+    profiles: ["ark"]
+    image: alpine:3.20
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        for path in /opt/ark/game /opt/ark/data/save /opt/ark/data/config /opt/ark/data/log /opt/ark/data/backups /opt/ark/data/cluster; do
+          mkdir -p "$$path"
+          chown -R 10001:10001 "$$path"
+        done
+    volumes:
+      - ark-game:/opt/ark/game
+      - ark-save:/opt/ark/data/save
+      - ark-config:/opt/ark/data/config
+      - ark-logs:/opt/ark/data/log
+      - ark-backups:/opt/ark/data/backups
+      - ark-cluster:/opt/ark/data/cluster
+    restart: "no"
+
+  ark:
+    profiles: ["ark"]
+    build:
+      context: .
+      dockerfile: deploy/docker/ark-runtime/Dockerfile
+      args:
+        PROTON_VERSION: ${PROTON_VERSION:-GE-Proton10-34}
+        PROTON_SHA256: ${PROTON_SHA256:-51c580b66a833c73998fe00f0717eeac57197654040a2f2ed5189e3ee68d773d}
+        STEAMCMD_SHA256: ${STEAMCMD_SHA256:-cebf0046bfd08cf45da6bc094ae47aa39ebf4155e5ede41373b579b8f1071e7c}
+    image: ${ARK_IMAGE:-ark-asa-runtime:local}
+    depends_on:
+      ark-permissions:
+        condition: service_completed_successfully
+    environment:
+      ARK_INSTANCE_ID: ${ARK_INSTANCE_ID:-theisland}
+      ARK_MAP: ${ARK_MAP:-TheIsland_WP}
+      ARK_PORT: ${ARK_PORT:-7777}
+      ARK_QUERY_PORT: ${ARK_QUERY_PORT:-27015}
+      ARK_RCON_PORT: ${ARK_RCON_PORT:-32330}
+      ARK_MAX_PLAYERS: ${ARK_MAX_PLAYERS:-10}
+      ARK_CLUSTER_ID: ${ARK_CLUSTER_ID:-local-cluster}
+      ARK_SERVER_NAME: ${ARK_SERVER_NAME:-ARK ASA TheIsland}
+      ARK_ADMIN_PASSWORD: ${ARK_ADMIN_PASSWORD:-change-admin-password}
+      ARK_PVE: ${ARK_PVE:-true}
+      ARK_CROSSPLAY: ${ARK_CROSSPLAY:-true}
+      ARK_BATTLEYE: ${ARK_BATTLEYE:-true}
+      ARK_UPDATE_ON_START: ${ARK_UPDATE_ON_START:-true}
+      STEAM_USER: ${STEAM_USER:-anonymous}
+      STEAM_PASSWORD: ${STEAM_PASSWORD:-}
+    volumes:
+      - ark-game:/opt/ark/game
+      - ark-save:/opt/ark/data/save
+      - ark-config:/opt/ark/data/config
+      - ark-logs:/opt/ark/data/log
+      - ark-backups:/opt/ark/data/backups
+      - ark-cluster:/opt/ark/data/cluster
+    ports:
+      - "${ARK_PORT:-7777}:${ARK_PORT:-7777}/udp"
+      - "${ARK_QUERY_PORT:-27015}:${ARK_QUERY_PORT:-27015}/udp"
+      - "${ARK_RCON_PORT:-32330}:${ARK_RCON_PORT:-32330}/tcp"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      start_period: ${ARK_START_PERIOD:-30m}
+      retries: 5
+    mem_limit: ${ARK_MEMORY_LIMIT:-12g}
+    cpus: ${ARK_CPUS:-4}
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    logging:
+      driver: json-file
+      options:
+        max-size: ${ARK_LOG_MAX_SIZE:-50m}
+        max-file: ${ARK_LOG_MAX_FILES:-5}
+    restart: unless-stopped
+
+  caddy:
+    profiles: ["caddy"]
+    image: caddy:2-alpine
+    ports:
+      - "${HTTPS_PORT:-8443}:443"
+      - "${HTTP_PORT:-8088}:80"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      control-plane:
+        condition: service_started
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  nginx:
+    profiles: ["nginx"]
+    image: nginx:1.27-alpine
+    ports:
+      - "${NGINX_PORT:-8088}:80"
+    volumes:
+      - ./deploy/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      control-plane:
+        condition: service_started
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  ark-game:
+  ark-save:
+  ark-config:
+  ark-logs:
+  ark-backups:
+  ark-cluster:
+  caddy-data:
+  caddy-config:
