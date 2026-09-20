@@ -1839,7 +1839,11 @@ func currentPrincipal(r *http.Request) principal {
 	return p
 }
 func (s *server) websocket(w http.ResponseWriter, r *http.Request) {
-	cursor, _ := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
+	cursor, err := parseEventCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_cursor", "cursor is invalid or expired")
+		return
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -1944,6 +1948,17 @@ func parseLimit(value string) int {
 		n = 50
 	}
 	return n
+}
+
+func parseEventCursor(value string) (int64, error) {
+	if value == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || n < 0 {
+		return 0, errors.New("invalid event cursor")
+	}
+	return n, nil
 }
 
 func encodeCursor(parts ...string) string {
