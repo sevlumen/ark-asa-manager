@@ -24,16 +24,26 @@ func TestOpenAPIContractHasRequiredOperations(t *testing.T) {
 	}
 
 	required := map[string]string{
-		"GET /api/v1/me":                              "current principal",
-		"POST /api/v1/auth/login":                    "login",
-		"GET /api/v1/nodes":                          "list nodes",
-		"POST /api/v1/nodes":                         "create node",
-		"GET /api/v1/instances":                     "list instances",
-		"POST /api/v1/instances":                    "create instance",
+		"POST /api/v1/auth/login":                      "login",
+		"POST /api/v1/auth/logout":                     "logout",
+		"GET /api/v1/auth/status":                      "authentication status",
+		"GET /api/v1/auth/csrf":                        "csrf rotation",
+		"GET /api/v1/me":                               "current principal",
+		"GET /api/v1/system/health":                    "system health",
+		"GET /api/v1/nodes":                            "list nodes",
+		"POST /api/v1/nodes":                           "create node",
+		"GET /api/v1/nodes/{id}":                       "node detail",
+		"GET /api/v1/instances":                        "list instances",
+		"POST /api/v1/instances":                       "create instance",
+		"GET /api/v1/instances/{id}":                   "instance detail",
+		"PATCH /api/v1/instances/{id}":                 "update instance",
 		"POST /api/v1/instances/{id}/actions/{action}": "instance action",
-		"GET /api/v1/jobs/{id}":                     "job status",
-		"GET /api/v1/audit":                         "audit records",
-		"GET /api/v1/ws":                            "realtime events",
+		"GET /api/v1/jobs":                             "list jobs",
+		"GET /api/v1/jobs/{id}":                        "job status",
+		"GET /api/v1/audit":                            "audit records",
+		"GET /api/v1/users":                            "list users",
+		"POST /api/v1/users":                           "create user",
+		"GET /api/v1/ws":                               "realtime events",
 	}
 	for route, description := range required {
 		method, routePath := splitRoute(route)
