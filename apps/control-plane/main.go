@@ -461,7 +461,12 @@ func (s *server) requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
 		if id == "" {
-			id, _ = randomID()
+			var err error
+			id, err = randomID()
+			if err != nil {
+				writeError(w, 500, "internal_error", "could not create request id")
+				return
+			}
 		}
 		w.Header().Set("X-Request-ID", id)
 		next.ServeHTTP(w, r)
@@ -638,7 +643,12 @@ func (s *server) createNode(w http.ResponseWriter, r *http.Request) {
 	}
 	id := strings.TrimSpace(input.ID)
 	if id == "" {
-		id, _ = randomID()
+		var err error
+		id, err = randomID()
+		if err != nil {
+			writeError(w, 500, "internal_error", "could not create node id")
+			return
+		}
 	}
 	if _, err := s.db.Exec(r.Context(), `INSERT INTO nodes (id,name,endpoint) VALUES ($1,$2,$3)`, id, input.Name, input.Endpoint); err != nil {
 		writeError(w, 409, "conflict", "node already exists")
@@ -1141,7 +1151,11 @@ func (s *server) createUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not hash password")
 		return
 	}
-	id, _ := randomID()
+	id, err := randomID()
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not create user id")
+		return
+	}
 	if _, err = s.db.Exec(r.Context(), `INSERT INTO users (id,username,password_hash,role) VALUES ($1,$2,$3,$4)`, id, input.Username, hash, input.Role); err != nil {
 		writeError(w, 409, "conflict", "username already exists")
 		return
