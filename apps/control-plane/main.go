@@ -77,6 +77,9 @@ func main() {
 	if err := s.bootstrapAdmin(ctx); err != nil {
 		log.Fatal(err)
 	}
+	if err := s.reconcileLocalInstance(ctx); err != nil {
+		log.Fatal(err)
+	}
 	r := chi.NewRouter()
 	r.Use(s.requestID)
 	r.Get("/healthz", s.health)
@@ -140,6 +143,27 @@ func (s *server) bootstrapAdmin(ctx context.Context) error {
 	}
 	_, err = s.db.Exec(ctx, `INSERT INTO users (id, username, password_hash, role) VALUES ($1, $2, $3, 'admin') ON CONFLICT (username) DO NOTHING`, id, username, hash)
 	return err
+}
+
+func (s *server) reconcileLocalInstance(ctx context.Context) error {
+	if strings.EqualFold(os.Getenv("BOOTSTRAP_LOCAL_INSTANCE"), "false") {
+		return nil
+	}
+	nodeID := getenv("NODE_ID", "local-node")
+	instanceID := getenv("ARK_INSTANCE_ID", "theisland")
+	mapName := getenv("ARK_MAP", "TheIsland_WP")
+	clusterID := getenv("ARK_CLUSTER_ID", "local-cluster")
+	if _, err := s.db.Exec(ctx, `INSERT INTO nodes (id,name,endpoint,status) VALUES ($1,$2,$3,'unknown') ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, endpoint=EXCLUDED.endpoint, updated_at=now()`, nodeID, nodeID, "agent:"+nodeID); err != nil {
+		return fmt.Errorf("reconcile local node: %w", err)
+	}
+	if _, err := s.db.Exec(ctx, `INSERT INTO instances (id,node_id,map_name,cluster_id,desired_state) VALUES ($1,$2,$3,$4,'stopped') ON CONFLICT (id) DO UPDATE SET node_id=EXCLUDED.node_id, map_name=EXCLUDED.map_name, cluster_id=EXCLUDED.cluster_id, updated_at=now()`, instanceID, nodeID, mapName, clusterID); err != nil {
+		return fmt.Errorf("reconcile local instance: %w", err)
+	}
+	_, err := s.db.Exec(ctx, `INSERT INTO instance_status (instance_id,observed_state,health) VALUES ($1,'unknown','unknown') ON CONFLICT (instance_id) DO NOTHING`, instanceID)
+	if err != nil {
+		return fmt.Errorf("reconcile local instance status: %w", err)
+	}
+	return nil
 }
 func (s *server) requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
