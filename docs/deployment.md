@@ -36,6 +36,13 @@ checks and starts the stack. Build the management CLI without installing Go on
 the host with `scripts/install-arkctl.sh`, then use `.bin/arkctl status` or
 `.bin/arkctl start` from the repository root.
 
+To verify the remote-node enrollment path with a disposable non-game agent,
+run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/acceptance/node_enrollment.ps1
+```
+
 On native Windows PowerShell, run `scripts/bootstrap.ps1`; it performs the same
 password generation, ACL protection, build, startup, and readiness checks.
 
