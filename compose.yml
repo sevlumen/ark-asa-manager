@@ -112,6 +112,8 @@ services:
       AGENT_TLS_CERT_FILE: /run/ark-tls/agent.pem
       AGENT_TLS_KEY_FILE: /run/ark-tls/agent-key.pem
       AGENT_TLS_CA_FILE: /run/ark-tls/ca.pem
+      ARK_RUNTIME_IMAGE: ${ARK_IMAGE:-ark-asa-runtime:local}
+      ARK_VOLUME_PREFIX: ${COMPOSE_PROJECT_NAME:-ark-asa-platform}
     depends_on:
       control-plane:
         condition: service_started

@@ -19,12 +19,13 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
-type config struct{ publicURL, internalURL, nodeID, dockerHost, certFile, keyFile, caFile string }
+type config struct{ publicURL, internalURL, nodeID, dockerHost, certFile, keyFile, caFile, runtimeImage, volumePrefix string }
 type agent struct {
 	cfg     config
 	control *http.Client
@@ -53,8 +54,11 @@ type observedInstance struct {
 }
 
 type desiredInstance struct {
-	InstanceID   string `json:"instance_id"`
-	DesiredState string `json:"desired_state"`
+	InstanceID   string         `json:"instance_id"`
+	DesiredState string         `json:"desired_state"`
+	Map          string         `json:"map"`
+	ClusterID    string         `json:"cluster_id"`
+	Ports        map[string]int `json:"ports"`
 }
 
 type heartbeatResponse struct {
@@ -69,7 +73,7 @@ type backupResult struct {
 }
 
 func main() {
-	cfg := config{publicURL: getenv("CONTROL_PLANE_URL", "http://control-plane:8080"), internalURL: getenv("CONTROL_PLANE_INTERNAL_URL", "https://control-plane:8443"), nodeID: getenv("NODE_ID", "local-node"), dockerHost: dockerBaseURL(getenv("DOCKER_HOST", "tcp://socket-proxy:2375")), certFile: getenv("AGENT_TLS_CERT_FILE", "/run/ark-tls/agent.pem"), keyFile: getenv("AGENT_TLS_KEY_FILE", "/run/ark-tls/agent-key.pem"), caFile: getenv("AGENT_TLS_CA_FILE", "/run/ark-tls/ca.pem")}
+	cfg := config{publicURL: getenv("CONTROL_PLANE_URL", "http://control-plane:8080"), internalURL: getenv("CONTROL_PLANE_INTERNAL_URL", "https://control-plane:8443"), nodeID: getenv("NODE_ID", "local-node"), dockerHost: dockerBaseURL(getenv("DOCKER_HOST", "tcp://socket-proxy:2375")), certFile: getenv("AGENT_TLS_CERT_FILE", "/run/ark-tls/agent.pem"), keyFile: getenv("AGENT_TLS_KEY_FILE", "/run/ark-tls/agent-key.pem"), caFile: getenv("AGENT_TLS_CA_FILE", "/run/ark-tls/ca.pem"), runtimeImage: getenv("ARK_RUNTIME_IMAGE", "ark-asa-runtime:local"), volumePrefix: getenv("ARK_VOLUME_PREFIX", "ark-asa-platform")}
 	control, err := mtlsClient(cfg)
 	if err != nil {
 		log.Fatal(err)
@@ -182,7 +186,13 @@ func (a *agent) heartbeat() error {
 	}
 	for _, desired := range response.DesiredInstances {
 		observed, ok := byInstance[desired.InstanceID]
-		if !ok || observed.ContainerID == "" {
+		if !ok {
+			if err := a.createManagedContainer(desired); err != nil {
+				return fmt.Errorf("create instance %q: %w", desired.InstanceID, err)
+			}
+			continue
+		}
+		if observed.ContainerID == "" {
 			continue
 		}
 		if action := desiredReconcileAction(desired.DesiredState, observed.ObservedState); action != "" {
@@ -206,6 +216,101 @@ func desiredReconcileAction(desiredState, observedState string) string {
 		return "stop"
 	}
 	return ""
+}
+
+type dockerContainerConfig struct {
+	Image        string              `json:"Image"`
+	User         string              `json:"User"`
+	Env          []string            `json:"Env"`
+	Labels       map[string]string   `json:"Labels"`
+	ExposedPorts map[string]struct{} `json:"ExposedPorts"`
+}
+
+type dockerHostConfig struct {
+	Binds         []string                       `json:"Binds"`
+	PortBindings  map[string][]map[string]string `json:"PortBindings"`
+	RestartPolicy map[string]any                 `json:"RestartPolicy"`
+}
+
+type dockerCreateRequest struct {
+	dockerContainerConfig
+	HostConfig dockerHostConfig `json:"HostConfig"`
+}
+
+func (a *agent) createManagedContainer(desired desiredInstance) error {
+	gamePort, gameOK := desired.Ports["game"]
+	queryPort, queryOK := desired.Ports["query"]
+	rconPort := desired.Ports["rcon"]
+	if !gameOK || !queryOK || gamePort < 1 || queryPort < 1 {
+		return errors.New("desired instance has incomplete port allocations")
+	}
+	containerPort := func(port int, protocol string) string { return strconv.Itoa(port) + "/" + protocol }
+	gameKey := containerPort(gamePort, "udp")
+	queryKey := containerPort(queryPort, "udp")
+	exposed := map[string]struct{}{gameKey: {}, queryKey: {}}
+	bindings := map[string][]map[string]string{
+		gameKey:  {{"HostPort": strconv.Itoa(gamePort)}},
+		queryKey: {{"HostPort": strconv.Itoa(queryPort)}},
+	}
+	if rconPort > 0 {
+		rconKey := containerPort(rconPort, "tcp")
+		exposed[rconKey] = struct{}{}
+	}
+	request := dockerCreateRequest{
+		dockerContainerConfig: dockerContainerConfig{
+			Image: a.cfg.runtimeImage,
+			User:  "10001:10001",
+			Env: []string{
+				"ARK_INSTANCE_ID=" + desired.InstanceID,
+				"ARK_MAP=" + desired.Map,
+				"ARK_PORT=" + strconv.Itoa(gamePort),
+				"ARK_QUERY_PORT=" + strconv.Itoa(queryPort),
+				"ARK_RCON_ENABLED=false",
+				"ARK_RCON_PORT=" + strconv.Itoa(rconPort),
+				"ARK_CLUSTER_ID=" + desired.ClusterID,
+				"ARK_UPDATE_ON_START=true",
+				"STEAM_USER=anonymous",
+			},
+			Labels: map[string]string{
+				"ark.platform.instance-id": desired.InstanceID,
+				"ark.platform.node-id":     a.cfg.nodeID,
+				"ark.platform.cluster-id":  desired.ClusterID,
+			},
+			ExposedPorts: exposed,
+		},
+		HostConfig: dockerHostConfig{
+			Binds: []string{
+				a.cfg.volumePrefix + "_" + desired.InstanceID + "-game:/opt/ark/game",
+				a.cfg.volumePrefix + "_" + desired.InstanceID + "-save:/opt/ark/data/save",
+				a.cfg.volumePrefix + "_" + desired.InstanceID + "-config:/opt/ark/data/config",
+				a.cfg.volumePrefix + "_" + desired.InstanceID + "-logs:/opt/ark/data/log",
+				a.cfg.volumePrefix + "_" + desired.InstanceID + "-backups:/opt/ark/data/backups",
+				a.cfg.volumePrefix + "_" + desired.InstanceID + "-cluster:/opt/ark/data/cluster",
+			},
+			PortBindings:  bindings,
+			RestartPolicy: map[string]any{"Name": "unless-stopped"},
+		},
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	var created struct {
+		ID string `json:"Id"`
+	}
+	name := "ark-" + desired.InstanceID
+	if err := a.dockerJSON(http.MethodPost, "/containers/create?name="+url.QueryEscape(name), bytes.NewReader(body), &created); err != nil {
+		return fmt.Errorf("create Docker container: %w", err)
+	}
+	if created.ID == "" {
+		return errors.New("Docker returned no container id")
+	}
+	if desired.DesiredState == "running" {
+		if err := a.dockerAction(http.MethodPost, "/containers/"+created.ID+"/start", nil); err != nil {
+			return fmt.Errorf("start created container: %w", err)
+		}
+	}
+	return nil
 }
 func (a *agent) poll() error {
 	var response job
@@ -535,6 +640,9 @@ func (a *agent) dockerJSON(method, path string, body io.Reader, out any) error {
 	req, err := http.NewRequest(method, a.cfg.dockerHost+path, body)
 	if err != nil {
 		return err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 	res, err := a.docker.Do(req)
 	if err != nil {

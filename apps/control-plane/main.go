@@ -249,17 +249,89 @@ func (s *server) reconcileLocalInstance(ctx context.Context) error {
 	instanceID := getenv("ARK_INSTANCE_ID", "theisland")
 	mapName := getenv("ARK_MAP", "TheIsland_WP")
 	clusterID := getenv("ARK_CLUSTER_ID", "local-cluster")
-	if _, err := s.db.Exec(ctx, `INSERT INTO nodes (id,name,endpoint,status) VALUES ($1,$2,$3,'unknown') ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, endpoint=EXCLUDED.endpoint, updated_at=now()`, nodeID, nodeID, "agent:"+nodeID); err != nil {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("reconcile local transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `INSERT INTO nodes (id,name,endpoint,status) VALUES ($1,$2,$3,'unknown') ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, endpoint=EXCLUDED.endpoint, updated_at=now()`, nodeID, nodeID, "agent:"+nodeID); err != nil {
 		return fmt.Errorf("reconcile local node: %w", err)
 	}
-	if _, err := s.db.Exec(ctx, `INSERT INTO instances (id,node_id,map_name,cluster_id,desired_state) VALUES ($1,$2,$3,$4,'stopped') ON CONFLICT (id) DO UPDATE SET node_id=EXCLUDED.node_id, map_name=EXCLUDED.map_name, cluster_id=EXCLUDED.cluster_id, updated_at=now()`, instanceID, nodeID, mapName, clusterID); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO instances (id,node_id,map_name,cluster_id,desired_state) VALUES ($1,$2,$3,$4,'stopped') ON CONFLICT (id) DO UPDATE SET node_id=EXCLUDED.node_id, map_name=EXCLUDED.map_name, cluster_id=EXCLUDED.cluster_id, updated_at=now()`, instanceID, nodeID, mapName, clusterID); err != nil {
 		return fmt.Errorf("reconcile local instance: %w", err)
 	}
-	_, err := s.db.Exec(ctx, `INSERT INTO instance_status (instance_id,observed_state,health) VALUES ($1,'unknown','unknown') ON CONFLICT (instance_id) DO NOTHING`, instanceID)
-	if err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO instance_status (instance_id,observed_state,health) VALUES ($1,'unknown','unknown') ON CONFLICT (instance_id) DO NOTHING`, instanceID); err != nil {
 		return fmt.Errorf("reconcile local instance status: %w", err)
 	}
+	if err := ensureInstancePorts(ctx, tx, nodeID, instanceID); err != nil {
+		return fmt.Errorf("reconcile local ports: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit local reconcile: %w", err)
+	}
 	return nil
+}
+
+type portRequirement struct {
+	purpose, protocol string
+	base              int
+}
+
+var defaultPortRequirements = []portRequirement{
+	{purpose: "game", protocol: "udp", base: 7777},
+	{purpose: "query", protocol: "udp", base: 27015},
+	{purpose: "rcon", protocol: "tcp", base: 32330},
+}
+
+func ensureInstancePorts(ctx context.Context, tx pgx.Tx, nodeID, instanceID string) error {
+	for _, requirement := range defaultPortRequirements {
+		if _, err := allocatePort(ctx, tx, nodeID, instanceID, requirement); err != nil {
+			return fmt.Errorf("allocate %s port: %w", requirement.purpose, err)
+		}
+	}
+	return nil
+}
+
+func allocatePort(ctx context.Context, tx pgx.Tx, nodeID, instanceID string, requirement portRequirement) (int, error) {
+	var existing int
+	err := tx.QueryRow(ctx, `SELECT port FROM port_allocations WHERE node_id=$1 AND instance_id=$2 AND purpose=$3`, nodeID, instanceID, requirement.purpose).Scan(&existing)
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		var port int
+		err = tx.QueryRow(ctx, `
+WITH candidate AS (
+    SELECT gs::integer AS port
+    FROM generate_series($4, $4 + 999) AS gs
+    WHERE NOT EXISTS (
+        SELECT 1 FROM port_allocations p
+        WHERE p.node_id=$1 AND p.protocol=$3 AND p.port=gs
+    )
+    ORDER BY port
+    LIMIT 1
+)
+INSERT INTO port_allocations (node_id,protocol,port,instance_id,purpose)
+SELECT $1,$3,port,$2,$5 FROM candidate
+ON CONFLICT DO NOTHING
+RETURNING port`, nodeID, instanceID, requirement.protocol, requirement.base, requirement.purpose).Scan(&port)
+		if err == nil {
+			return port, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return 0, err
+		}
+		if err = tx.QueryRow(ctx, `SELECT port FROM port_allocations WHERE node_id=$1 AND instance_id=$2 AND purpose=$3`, nodeID, instanceID, requirement.purpose).Scan(&existing); err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return 0, err
+		}
+	}
+	return 0, fmt.Errorf("no free %s port in range %d-%d", requirement.purpose, requirement.base, requirement.base+999)
 }
 
 func (s *server) agentIdentity(r *http.Request) (string, bool) {
@@ -490,20 +562,33 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 			s.appendEvent(r.Context(), "instance.status_changed", "instance", item.id, map[string]any{"observed_state": state, "health": health, "last_error": lastError})
 		}
 	}
-	desiredRows, err := s.db.Query(r.Context(), `SELECT id,desired_state FROM instances WHERE node_id=$1`, nodeID)
+	desiredRows, err := s.db.Query(r.Context(), `
+SELECT i.id,i.desired_state,i.map_name,i.cluster_id,
+       COALESCE(jsonb_object_agg(pa.purpose,pa.port) FILTER (WHERE pa.purpose IS NOT NULL), '{}'::jsonb)
+FROM instances i
+LEFT JOIN port_allocations pa ON pa.instance_id=i.id AND pa.node_id=i.node_id
+WHERE i.node_id=$1
+GROUP BY i.id,i.desired_state,i.map_name,i.cluster_id`, nodeID)
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not read desired instance state")
 		return
 	}
-	desired := make([]map[string]string, 0)
+	desired := make([]map[string]any, 0)
 	for desiredRows.Next() {
-		var instanceID, desiredState string
-		if err := desiredRows.Scan(&instanceID, &desiredState); err != nil {
+		var instanceID, desiredState, mapName, clusterID string
+		var ports []byte
+		if err := desiredRows.Scan(&instanceID, &desiredState, &mapName, &clusterID, &ports); err != nil {
 			desiredRows.Close()
 			writeError(w, 500, "internal_error", "could not read desired instance state")
 			return
 		}
-		desired = append(desired, map[string]string{"instance_id": instanceID, "desired_state": desiredState})
+		var decodedPorts map[string]int
+		if err := json.Unmarshal(ports, &decodedPorts); err != nil {
+			desiredRows.Close()
+			writeError(w, 500, "internal_error", "could not decode desired instance ports")
+			return
+		}
+		desired = append(desired, map[string]any{"instance_id": instanceID, "desired_state": desiredState, "map": mapName, "cluster_id": clusterID, "ports": decodedPorts})
 	}
 	desiredRows.Close()
 	writeJSON(w, 200, map[string]any{"node_id": nodeID, "status": "online", "observed_at": time.Now().UTC(), "desired_instances": desired})
@@ -994,6 +1079,10 @@ func (s *server) createInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err = tx.Exec(r.Context(), `INSERT INTO instance_status (instance_id) VALUES ($1) ON CONFLICT DO NOTHING`, input.ID); err != nil {
 		writeError(w, 500, "internal_error", "could not initialize instance status")
+		return
+	}
+	if err = ensureInstancePorts(r.Context(), tx, input.NodeID, input.ID); err != nil {
+		writeError(w, 409, "conflict", "could not allocate instance ports")
 		return
 	}
 	if err = tx.Commit(r.Context()); err != nil {
