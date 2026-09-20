@@ -44,6 +44,14 @@ if (-not (Test-Path $migrationPath)) {
     if ($downMigration -match '(?im)^\s*(DROP TABLE|ALTER TABLE .*RENAME TO)') {
         $failures.Add('Migration 003 down path must preserve the port_allocations relation.')
     }
+    foreach ($needle in @(
+        'GROUP BY instance_id, protocol',
+        'HAVING COUNT(*) > 1',
+        'RAISE EXCEPTION',
+        'multiple role rows share the same instance_id/protocol'
+    )) {
+        if (-not $downMigration.Contains($needle)) { $failures.Add("Migration down guard must contain $needle.") }
+    }
 }
 
 $openapi = Get-Content $openapiPath -Raw

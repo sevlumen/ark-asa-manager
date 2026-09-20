@@ -37,6 +37,24 @@ ALTER TABLE port_allocations
     );
 
 -- +goose Down
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM port_allocations
+        GROUP BY instance_id, protocol
+        HAVING COUNT(*) > 1
+    ) THEN
+        RAISE EXCEPTION
+            USING
+                ERRCODE = '23514',
+                MESSAGE = 'cannot downgrade port_allocations: multiple role rows share the same instance_id/protocol',
+                DETAIL = 'Role-aware allocations would collapse under UNIQUE(instance_id, protocol).',
+                HINT = 'Remove or migrate duplicate role allocations before downgrading.';
+    END IF;
+END
+$$;
+
 ALTER TABLE port_allocations
     DROP CONSTRAINT IF EXISTS port_allocations_role_protocol_check,
     DROP CONSTRAINT IF EXISTS port_allocations_container_port_check,
