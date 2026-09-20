@@ -6,6 +6,8 @@ $downloader = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\download-r
 $entrypoint = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\entrypoint.sh') -Raw
 $healthcheck = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\healthcheck.sh') -Raw
 $compose = Get-Content (Join-Path $root 'compose.yml') -Raw
+$webPackage = Get-Content (Join-Path $root 'apps\web\package.json') -Raw
+$webDockerfile = Get-Content (Join-Path $root 'apps\web\Dockerfile') -Raw
 $failures = [System.Collections.Generic.List[string]]::new()
 
 function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
@@ -95,6 +97,9 @@ Assert-Contains $compose 'ARK_START_PERIOD' 'Runtime start period must cover fir
 Assert-Contains $compose 'ARK_DISABLE_GAME_ANALYTICS' 'Compose must expose the Game Analytics setting.'
 Assert-Contains $compose 'seccomp=unconfined' 'umu pressure-vessel requires an unconfined seccomp profile.'
 Assert-Contains $compose 'apparmor=unconfined' 'umu pressure-vessel requires an unconfined AppArmor profile.'
+Assert-NotContains $webPackage '"latest"' 'Web dependencies must be pinned to exact versions.'
+Assert-Contains $webDockerfile 'bun install --frozen-lockfile' 'Web image must use a frozen dependency install.'
+Assert-NotContains $webDockerfile '|| bun install' 'Web image must not fall back to a non-frozen install.'
 
 if ($failures.Count -gt 0) {
     throw ($failures -join [Environment]::NewLine)
