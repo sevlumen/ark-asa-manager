@@ -100,6 +100,8 @@ Assert-Contains $compose 'apparmor=unconfined' 'umu pressure-vessel requires an 
 Assert-NotContains $webPackage '"latest"' 'Web dependencies must be pinned to exact versions.'
 Assert-Contains $webDockerfile 'bun install --frozen-lockfile' 'Web image must use a frozen dependency install.'
 Assert-NotContains $webDockerfile '|| bun install' 'Web image must not fall back to a non-frozen install.'
+Assert-Contains $webDockerfile 'oven/bun:1.2-alpine@sha256:' 'Web build and runtime images must be digest pinned.'
+Assert-NotContains $compose 'tecnativa/docker-socket-proxy:latest' 'Socket proxy image must not float on latest.'
 
 if ($failures.Count -gt 0) {
     throw ($failures -join [Environment]::NewLine)
