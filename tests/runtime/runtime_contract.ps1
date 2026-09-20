@@ -120,7 +120,7 @@ Assert-Contains $envExample 'PUBLIC_ORIGIN=http://localhost:3000' 'Environment e
 Assert-Contains $compose 'control-plane-enrollment-ca' 'Enrollment CA must use a dedicated Docker volume.'
 Assert-Contains $compose 'ENROLLMENT_CA_CERT_FILE' 'Control-plane enrollment signer certificate path is missing.'
 Assert-Contains $compose 'AGENT_ENROLLMENT_CA_FILE' 'Agent enrollment CA trust path is missing.'
-$copyEnrollmentCA = $tlsInit.IndexOf('cp "$enrollment_out/ca.pem" "$out/enrollment-ca.pem"')
+$copyEnrollmentCA = $tlsInit.LastIndexOf('cp "$enrollment_out/ca.pem" "$out/enrollment-ca.pem"')
 $lastTLSReset = $tlsInit.LastIndexOf('rm -f "$out"/*')
 if ($copyEnrollmentCA -lt 0 -or $copyEnrollmentCA -lt $lastTLSReset) {
     $failures.Add('Fresh tls-init bootstrap must copy enrollment-ca.pem after clearing generated TLS files.')
