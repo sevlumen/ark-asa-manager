@@ -110,6 +110,7 @@ Assert-NotContains $envExample 'POSTGRES_PASSWORD=change-me' 'Environment exampl
 Assert-Contains $compose 'POSTGRES_PASSWORD:?' 'Compose must require an explicit PostgreSQL password.'
 Assert-Contains $bootstrap 'openssl rand -hex 24' 'Bootstrap must generate a PostgreSQL password when creating .env.'
 Assert-Contains $bootstrapPs 'RandomNumberGenerator' 'PowerShell bootstrap must generate a PostgreSQL password with a CSPRNG.'
+Assert-Contains $bootstrapPs 'BitConverter' 'PowerShell bootstrap must support Windows PowerShell password generation.'
 Assert-Contains $bootstrapPs 'Set-Acl' 'PowerShell bootstrap must protect the local .env file.'
 Assert-Contains $compose 'PUBLIC_ORIGIN:-http://localhost:3000' 'Control-plane origin must match the web console default.'
 Assert-Contains $envExample 'PUBLIC_ORIGIN=http://localhost:3000' 'Environment example must document the web console origin.'

@@ -15,7 +15,7 @@ function New-PostgresPassword {
     $bytes = New-Object byte[] 24
     $random = [Security.Cryptography.RandomNumberGenerator]::Create()
     try { $random.GetBytes($bytes) } finally { $random.Dispose() }
-    return ([Convert]::ToHexString($bytes)).ToLowerInvariant()
+    return ([BitConverter]::ToString($bytes).Replace('-', '')).ToLowerInvariant()
 }
 
 $envPath = Join-Path $root '.env'
