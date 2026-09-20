@@ -79,6 +79,13 @@ foreach ($path in @('/api/v1/me', '/api/v1/system/health', '/api/v1/instances?li
     Assert-Status $response 200 "Admin API request failed: $path"
 }
 
+$audit = (Invoke-SmokeRequest GET '/api/v1/audit?limit=100').Body | ConvertFrom-Json
+foreach ($entry in @($audit.items)) {
+    if ($entry.action -in @('auth.login', 'auth.logout') -and [string]$entry.resource -like 'session:*') {
+        throw 'Audit trail exposes a raw session identifier.'
+    }
+}
+
 $csrfDenied = Invoke-SmokeRequest POST '/api/v1/instances/theisland/actions/restart' -Body @{}
 Assert-Status $csrfDenied 403 'Mutation without CSRF was not rejected'
 

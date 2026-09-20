@@ -227,6 +227,12 @@ func TestInstanceStorageMatchesManagedVolumeBoundaries(t *testing.T) {
 	}
 }
 
+func TestAuditSessionResourceDoesNotExposeBearerToken(t *testing.T) {
+	if auditSessionResource != "session" {
+		t.Fatalf("audit session resource must not contain a session token: %q", auditSessionResource)
+	}
+}
+
 func TestBuildActionPayloadPreservesBackupID(t *testing.T) {
 	payload, err := buildActionPayload("restore", "backup-123")
 	if err != nil || payload["action"] != "restore" || payload["backup_id"] != "backup-123" {

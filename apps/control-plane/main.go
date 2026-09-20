@@ -37,9 +37,10 @@ import (
 )
 
 const (
-	sessionCookie = "ark_session"
-	csrfCookie    = "ark_csrf"
-	sessionTTL    = 12 * time.Hour
+	sessionCookie        = "ark_session"
+	csrfCookie           = "ark_csrf"
+	sessionTTL           = 12 * time.Hour
+	auditSessionResource = "session"
 )
 
 type contextKey string
@@ -1083,14 +1084,14 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	s.setCookie(w, sessionCookie, sessionID, true, expires)
 	s.setCookie(w, csrfCookie, csrf, false, expires)
-	s.recordAudit(r.Context(), p.Username, "auth.login", "session:"+sessionID, map[string]any{"outcome": "allowed"})
+	s.recordAudit(r.Context(), p.Username, "auth.login", auditSessionResource, map[string]any{"outcome": "allowed"})
 	writeJSON(w, 200, map[string]any{"user": p, "expires_at": expires})
 }
 func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	p := currentPrincipal(r)
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		_, _ = s.db.Exec(r.Context(), `UPDATE sessions SET revoked_at=now() WHERE id=$1`, c.Value)
-		s.recordAudit(r.Context(), p.Username, "auth.logout", "session:"+c.Value, map[string]any{"outcome": "allowed"})
+		s.recordAudit(r.Context(), p.Username, "auth.logout", auditSessionResource, map[string]any{"outcome": "allowed"})
 	}
 	s.setCookie(w, sessionCookie, "", true, time.Unix(0, 0))
 	s.setCookie(w, csrfCookie, "", false, time.Unix(0, 0))
