@@ -95,3 +95,18 @@ func TestJobFailureStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestValidNodeEndpoint(t *testing.T) {
+	valid := []string{"https://node.example:8443", "http://10.0.0.8:8080"}
+	for _, value := range valid {
+		if !validNodeEndpoint(value) {
+			t.Errorf("validNodeEndpoint(%q) = false", value)
+		}
+	}
+	invalid := []string{"node.example:8443", "ftp://node.example", "https://user:pass@node.example", "/var/run/node.sock", "https://"}
+	for _, value := range invalid {
+		if validNodeEndpoint(value) {
+			t.Errorf("validNodeEndpoint(%q) = true", value)
+		}
+	}
+}

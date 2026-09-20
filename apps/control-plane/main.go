@@ -16,6 +16,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -585,7 +586,12 @@ func (s *server) node(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) createNode(w http.ResponseWriter, r *http.Request) {
 	var input struct{ ID, Name, Endpoint string }
-	if !decodeJSON(w, r, &input) || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Endpoint) == "" {
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	input.Endpoint = strings.TrimSpace(input.Endpoint)
+	if input.Name == "" || !validNodeEndpoint(input.Endpoint) {
 		writeError(w, 400, "invalid_request", "name and endpoint are required")
 		return
 	}
@@ -593,13 +599,21 @@ func (s *server) createNode(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		id, _ = randomID()
 	}
-	if _, err := s.db.Exec(r.Context(), `INSERT INTO nodes (id,name,endpoint) VALUES ($1,$2,$3)`, id, strings.TrimSpace(input.Name), strings.TrimSpace(input.Endpoint)); err != nil {
+	if _, err := s.db.Exec(r.Context(), `INSERT INTO nodes (id,name,endpoint) VALUES ($1,$2,$3)`, id, input.Name, input.Endpoint); err != nil {
 		writeError(w, 409, "conflict", "node already exists")
 		return
 	}
 	p := currentPrincipal(r)
 	s.recordAudit(r.Context(), p.Username, "node.create", "node:"+id, map[string]any{"outcome": "allowed"})
-	writeJSON(w, 201, map[string]any{"id": id, "name": strings.TrimSpace(input.Name), "endpoint": strings.TrimSpace(input.Endpoint), "status": "unknown", "last_heartbeat": nil})
+	writeJSON(w, 201, map[string]any{"id": id, "name": input.Name, "endpoint": input.Endpoint, "status": "unknown", "last_heartbeat": nil})
+}
+
+func validNodeEndpoint(value string) bool {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" || parsed.User != nil {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
