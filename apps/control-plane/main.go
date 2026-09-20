@@ -942,8 +942,13 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 	var exists bool
-	if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM instances WHERE id=$1)`, id).Scan(&exists); err != nil || !exists {
+	var observedState string
+	if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM instances WHERE id=$1), COALESCE((SELECT observed_state FROM instance_status WHERE instance_id=$1),'unknown')`, id).Scan(&exists, &observedState); err != nil || !exists {
 		writeError(w, 404, "not_found", "instance not found")
+		return
+	}
+	if lifecycleActionConflicts(action, observedState) {
+		writeError(w, 409, "conflict", fmt.Sprintf("cannot %s an instance that is already %s", action, observedState))
 		return
 	}
 	jobID, err := randomID()
@@ -964,6 +969,10 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 	s.appendEvent(r.Context(), "job.queued", "job", jobID, map[string]any{"instance_id": id, "kind": action})
 	s.recordAudit(r.Context(), p.Username, "instance.action", "instance:"+id, map[string]any{"action": action, "outcome": "allowed", "job_id": jobID})
 	writeJSON(w, 202, map[string]any{"id": jobID, "status": "queued", "instance_id": id, "kind": action})
+}
+
+func lifecycleActionConflicts(action, observedState string) bool {
+	return (action == "start" && observedState == "running") || (action == "stop" && observedState == "stopped")
 }
 
 func buildActionPayload(action, backupID string) (map[string]string, error) {

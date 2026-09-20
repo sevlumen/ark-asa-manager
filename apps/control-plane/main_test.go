@@ -179,6 +179,22 @@ func TestBuildActionPayloadPreservesBackupID(t *testing.T) {
 	}
 }
 
+func TestLifecycleActionConflicts(t *testing.T) {
+	if !lifecycleActionConflicts("start", "running") {
+		t.Fatal("start should conflict with a running instance")
+	}
+	if !lifecycleActionConflicts("stop", "stopped") {
+		t.Fatal("stop should conflict with a stopped instance")
+	}
+	for _, test := range []struct{ action, observed string }{
+		{"start", "stopped"}, {"start", "unknown"}, {"stop", "running"}, {"restart", "running"},
+	} {
+		if lifecycleActionConflicts(test.action, test.observed) {
+			t.Errorf("%s with observed state %s should be allowed", test.action, test.observed)
+		}
+	}
+}
+
 func TestDecodeHeartbeatPayloadRejectsMalformedJSON(t *testing.T) {
 	if _, err := decodeHeartbeatPayload(strings.NewReader("{not-json")); err == nil {
 		t.Fatal("malformed heartbeat JSON should be rejected")
