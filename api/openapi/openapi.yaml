@@ -323,13 +323,24 @@ components:
         desired_state: { type: string, enum: [running, stopped] }
         observed_state: { type: string, enum: [unknown, creating, running, stopped, failed, updating] }
         ports:
-          type: object
-          required: [game, query, rcon]
-          properties:
-            game: { type: integer, minimum: 1, maximum: 65535 }
-            query: { type: integer, minimum: 1, maximum: 65535 }
-            rcon: { type: integer, minimum: 1, maximum: 65535 }
+          type: array
+          items: { $ref: '#/components/schemas/PortAllocation' }
         storage: { $ref: '#/components/schemas/StorageSpec' }
+    PortAllocation:
+      type: object
+      required: [role, protocol, host_port, container_port]
+      properties:
+        role: { type: string, enum: [game, peer, query, rcon] }
+        protocol: { type: string, enum: [udp, tcp] }
+        host_port: { type: integer, minimum: 1, maximum: 65535 }
+        container_port: { type: integer, minimum: 1, maximum: 65535 }
+    PortRequest:
+      type: object
+      required: [role]
+      properties:
+        role: { type: string, enum: [game, peer, query, rcon] }
+        host_port: { type: integer, minimum: 1, maximum: 65535, nullable: true }
+        container_port: { type: integer, minimum: 1, maximum: 65535, nullable: true }
     CreateInstanceRequest:
       type: object
       required: [id, node_id, cluster_id]
@@ -340,6 +351,9 @@ components:
         cluster_id: { type: string }
         player_limit: { type: integer, minimum: 1, maximum: 100 }
         desired_state: { type: string, enum: [running, stopped], default: stopped }
+        port_requests:
+          type: array
+          items: { $ref: '#/components/schemas/PortRequest' }
     UpdateInstanceRequest:
       type: object
       properties:
