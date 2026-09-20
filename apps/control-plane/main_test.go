@@ -52,6 +52,19 @@ func TestCursorRoundTrip(t *testing.T) {
 	}
 }
 
+func TestParseEventCursorRejectsInvalidValues(t *testing.T) {
+	for _, input := range []string{"abc", "-1", "1.5"} {
+		if _, err := parseEventCursor(input); err == nil {
+			t.Errorf("parseEventCursor(%q) should reject invalid cursor", input)
+		}
+	}
+	for input, want := range map[string]int64{"": 0, "0": 0, "42": 42} {
+		if got, err := parseEventCursor(input); err != nil || got != want {
+			t.Errorf("parseEventCursor(%q) = %d, %v; want %d, nil", input, got, err, want)
+		}
+	}
+}
+
 func TestLoginThrottleIsBoundedAndResettable(t *testing.T) {
 	const ip, username = "test-ip", "test-user"
 	clearLoginFailures(ip, username)
