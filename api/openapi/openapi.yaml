@@ -465,6 +465,7 @@ paths:
           schema: { type: integer, format: int64, minimum: 0 }
       responses:
         '101': { description: WebSocket protocol switch. }
+        '400': { description: Invalid or expired event cursor. }
         '401': { $ref: '#/components/responses/Unauthorized' }
 components:
   securitySchemes:
