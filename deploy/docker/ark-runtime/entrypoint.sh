@@ -203,6 +203,9 @@ fi
 if [[ "${ARK_BATTLEYE:-true}" != "true" ]]; then
   server_args+=(-NoBattlEye)
 fi
+if [[ "${ARK_DISABLE_GAME_ANALYTICS:-true}" == "true" ]]; then
+  server_args+=(-NoGameAnalytics)
+fi
 
 (
   cd "$game_root/ShooterGame/Binaries/Win64"
