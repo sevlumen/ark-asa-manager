@@ -105,6 +105,8 @@ Assert-Contains $webDockerfile 'bun install --frozen-lockfile' 'Web image must u
 Assert-NotContains $webDockerfile '|| bun install' 'Web image must not fall back to a non-frozen install.'
 Assert-Contains $webDockerfile 'oven/bun:1.2-alpine@sha256:' 'Web build and runtime images must be digest pinned.'
 Assert-NotContains $compose 'tecnativa/docker-socket-proxy:latest' 'Socket proxy image must not float on latest.'
+Assert-Contains $compose 'caddy:2-alpine@sha256:' 'Caddy image must be digest pinned.'
+Assert-Contains $compose 'nginx:1.27-alpine@sha256:' 'Nginx image must be digest pinned.'
 Assert-NotContains $compose 'POSTGRES_PASSWORD:-change-me' 'Compose must not provide the unsafe PostgreSQL password fallback.'
 Assert-NotContains $envExample 'POSTGRES_PASSWORD=change-me' 'Environment example must not contain the unsafe PostgreSQL password.'
 Assert-Contains $compose 'POSTGRES_PASSWORD:?' 'Compose must require an explicit PostgreSQL password.'

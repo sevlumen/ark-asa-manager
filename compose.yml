@@ -236,7 +236,7 @@ services:
 
   caddy:
     profiles: ["caddy"]
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:de23def33b17fb5d1290b0f6c2add1d70780e52341896c00a4c8a2a2fe9d355e
     ports:
       - "${HTTPS_PORT:-8443}:443"
       - "${HTTP_PORT:-8088}:80"
@@ -253,7 +253,7 @@ services:
 
   nginx:
     profiles: ["nginx"]
-    image: nginx:1.27-alpine
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     ports:
       - "${NGINX_PORT:-8088}:80"
     volumes:
