@@ -187,8 +187,31 @@ func TestAgentLeaseQueryScopesJobsToOwningNode(t *testing.T) {
 }
 
 func TestAgentIdentityChecksEnrolledCertificateFingerprint(t *testing.T) {
-	if !strings.Contains(agentIdentityQuery, "node_certificates") || !strings.Contains(agentIdentityQuery, "fingerprint") || !strings.Contains(agentIdentityQuery, "expires_at") {
-		t.Fatal("agent identity must bind enrolled certificates to their recorded fingerprint")
+	if !strings.Contains(agentIdentityQuery, "node_certificates") || !strings.Contains(agentIdentityQuery, "node_enrollments") || !strings.Contains(agentIdentityQuery, "fingerprint") || !strings.Contains(agentIdentityQuery, "expires_at") {
+		t.Fatal("agent identity must bind enrolled nodes to their recorded certificate fingerprint")
+	}
+}
+
+func TestEnrolledCertificateMatchesRejectsLegacyOrExpiredCertificates(t *testing.T) {
+	now := time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC)
+	fingerprint := "abc123"
+	validExpiry := now.Add(time.Hour)
+	registered := fingerprint
+	if !enrolledCertificateMatches(false, nil, nil, fingerprint, now) {
+		t.Fatal("legacy local nodes should retain static certificate compatibility")
+	}
+	for name, expiry := range map[string]*time.Time{
+		"missing certificate": nil,
+		"expired certificate": func() *time.Time { value := now.Add(-time.Hour); return &value }(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if enrolledCertificateMatches(true, nil, expiry, fingerprint, now) {
+				t.Fatal("enrolled node must not accept an unregistered or expired certificate")
+			}
+		})
+	}
+	if enrolledCertificateMatches(true, &registered, &validExpiry, "wrong", now) || !enrolledCertificateMatches(true, &registered, &validExpiry, fingerprint, now) {
+		t.Fatal("enrolled certificate fingerprint/expiry validation is incorrect")
 	}
 }
 
