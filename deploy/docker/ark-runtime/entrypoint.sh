@@ -121,13 +121,11 @@ for item in Config Logs Saved; do
   ln -s "$target" "$game_root/ShooterGame/Saved/$item"
 done
 
-if [[ -n "$admin_password" || -n "$server_password" ]]; then
-  mkdir -p "$data_root/config/WindowsServer"
-  write_ark_passwords_config \
-    "$data_root/config/WindowsServer/GameUserSettings.ini" \
-    "$admin_password" \
-    "$server_password"
-fi
+mkdir -p "$data_root/config/WindowsServer"
+write_ark_passwords_config \
+  "$data_root/config/WindowsServer/GameUserSettings.ini" \
+  "$admin_password" \
+  "$server_password"
 
 proton_data_root="${STEAM_COMPAT_DATA_PATH:-$data_root/config/proton}"
 export STEAM_COMPAT_DATA_PATH="$proton_data_root"

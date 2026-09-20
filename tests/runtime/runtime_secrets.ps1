@@ -68,6 +68,9 @@ grep -Fqx 'ServerAdminPassword=fake-admin-password' "$config"
 grep -Fqx 'ServerPassword=fake-server-password' "$config"
 ! grep -Fqx 'ServerAdminPassword=old-admin-password' "$config"
 test "$(stat -c %a "$config")" = 600
+write_ark_passwords_config "$config" "" ""
+! grep -q '^ServerAdminPassword=' "$config"
+! grep -q '^ServerPassword=' "$config"
 '@
     $configProbe = $configProbe -replace "`r", ''
     docker run --rm --entrypoint bash $image -c $configProbe

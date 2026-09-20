@@ -63,15 +63,11 @@ write_ark_passwords_config() {
         if [[ -n "$admin_password" ]]; then
           printf 'ServerAdminPassword=%s\n' "$admin_password"
           admin_written=1
-        else
-          printf '%s\n' "$line"
         fi
       elif [[ "$in_server_settings" == 1 && "$line" == ServerPassword=* ]]; then
         if [[ -n "$server_password" ]]; then
           printf 'ServerPassword=%s\n' "$server_password"
           server_written=1
-        else
-          printf '%s\n' "$line"
         fi
       else
         printf '%s\n' "$line"
