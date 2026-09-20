@@ -1,0 +1,6 @@
+services:
+  ark:
+    environment:
+      ARK_RCON_ENABLED: "true"
+    ports:
+      - "${ARK_RCON_PORT:-32330}:${ARK_RCON_PORT:-32330}/tcp"

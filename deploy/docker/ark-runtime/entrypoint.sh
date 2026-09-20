@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+source /usr/local/bin/secrets.sh
+
 game_root=/opt/ark/game
 data_root=/opt/ark/data
 server_exe="$game_root/ShooterGame/Binaries/Win64/ArkAscendedServer.exe"
@@ -9,6 +11,53 @@ engine_log="$data_root/log/ShooterGame.log"
 ready_marker="$data_root/log/ready.marker"
 server_pid=""
 xvfb_pid=""
+
+if [[ -n "${ARK_ADMIN_PASSWORD:-}" || -n "${ARK_SERVER_PASSWORD:-}" ]]; then
+  echo 'Plaintext ARK passwords are not accepted; configure *_PASSWORD_FILE instead.' >&2
+  exit 1
+fi
+
+rcon_enabled="${ARK_RCON_ENABLED:-false}"
+case "${rcon_enabled,,}" in
+  true) rcon_enabled=true ;;
+  false) rcon_enabled=false ;;
+  *)
+    echo 'ARK_RCON_ENABLED must be true or false.' >&2
+    exit 1
+    ;;
+esac
+
+secret_values=()
+server_password=""
+admin_password=""
+
+if [[ -n "${ARK_SERVER_PASSWORD_FILE:-}" ]]; then
+  server_password="$(read_secret_file "$ARK_SERVER_PASSWORD_FILE")"
+  [[ -z "$server_password" ]] || secret_values+=("$server_password")
+fi
+if [[ -n "${ARK_ADMIN_PASSWORD_FILE:-}" ]]; then
+  admin_password="$(read_secret_file "$ARK_ADMIN_PASSWORD_FILE")"
+  [[ -z "$admin_password" ]] || secret_values+=("$admin_password")
+fi
+if [[ "$rcon_enabled" == true && -z "$admin_password" ]]; then
+  echo 'ARK_ADMIN_PASSWORD_FILE is required and must contain a value when RCON is enabled.' >&2
+  exit 1
+fi
+if [[ -n "${STEAM_PASSWORD:-}" ]]; then
+  secret_values+=("$STEAM_PASSWORD")
+fi
+
+redact_stream() {
+  local line
+  local secret
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    for secret in "${secret_values[@]}"; do
+      [[ -z "$secret" ]] || line="${line//"$secret"/[REDACTED]}"
+    done
+    printf '%s\n' "$line"
+  done
+}
 
 mkdir -p "$data_root"/{save,config,log,backups,cluster}
 rm -f "$ready_marker"
@@ -28,7 +77,7 @@ if [[ "${ARK_UPDATE_ON_START:-true}" == "true" ]]; then
   for steam_attempt in 1 2 3 4 5; do
     echo "SteamCMD app update attempt $steam_attempt/5" | tee -a "$steam_log"
     set +e
-    "$steam_binary" "${steam_args[@]}" 2>&1 | tee -a "$steam_log"
+    "$steam_binary" "${steam_args[@]}" 2>&1 | redact_stream | tee -a "$steam_log"
     steam_status=${PIPESTATUS[0]}
     set -e
 
@@ -113,7 +162,7 @@ fi
 
 if [[ "${ARK_INSTALL_VCREDIST:-true}" == "true" && ! -f "$WINEPREFIX/drive_c/windows/system32/vcruntime140.dll" ]]; then
   echo "Installing Microsoft Visual C++ runtime into the persistent Proton prefix" | tee -a "$server_log"
-  /opt/ark/proton/proton runinprefix /opt/ark/vc_redist.x64.exe /quiet /norestart 2>&1 | tee -a "$server_log"
+  /opt/ark/proton/proton runinprefix /opt/ark/vc_redist.x64.exe /quiet /norestart 2>&1 | redact_stream | tee -a "$server_log"
 fi
 
 pve_query='ServerPVE=true'
@@ -124,8 +173,19 @@ fi
 server_name="${ARK_SERVER_NAME:-ARK_ASA_TheIsland}"
 server_name="${server_name// /_}"
 
+server_query="${ARK_MAP:-TheIsland_WP}?listen?SessionName=${server_name}?MaxPlayers=${ARK_MAX_PLAYERS:-10}?${pve_query}?RCONEnabled=${rcon_enabled}"
+if [[ "$rcon_enabled" == true ]]; then
+  server_query+="?RCONPort=${ARK_RCON_PORT:-32330}"
+fi
+if [[ -n "$admin_password" ]]; then
+  server_query+="?ServerAdminPassword=${admin_password}"
+fi
+if [[ -n "$server_password" ]]; then
+  server_query+="?ServerPassword=${server_password}"
+fi
+
 server_args=(
-  "${ARK_MAP:-TheIsland_WP}?listen?SessionName=${server_name}?MaxPlayers=${ARK_MAX_PLAYERS:-10}?${pve_query}?RCONEnabled=True?RCONPort=${ARK_RCON_PORT:-32330}?ServerPassword=${ARK_SERVER_PASSWORD:-}"
+  "$server_query"
   -game
   -server
   -log
@@ -153,7 +213,7 @@ fi
 
 (
   cd "$game_root/ShooterGame/Binaries/Win64"
-  /opt/ark/proton/proton run ./ArkAscendedServer.exe "${server_args[@]}" 2>&1 | tee -a "$server_log"
+  /opt/ark/proton/proton run ./ArkAscendedServer.exe "${server_args[@]}" 2>&1 | redact_stream | tee -a "$server_log"
 ) &
 server_pid=$!
 
