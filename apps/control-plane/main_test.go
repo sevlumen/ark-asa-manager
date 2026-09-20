@@ -150,3 +150,17 @@ func TestEffectiveNodeStatusMarksStaleHeartbeatOffline(t *testing.T) {
 		t.Fatalf("unknown node status = %q, want unknown", got)
 	}
 }
+
+func TestBuildActionPayloadPreservesBackupID(t *testing.T) {
+	payload, err := buildActionPayload("restore", "backup-123")
+	if err != nil || payload["action"] != "restore" || payload["backup_id"] != "backup-123" {
+		t.Fatalf("unexpected restore payload: %#v, %v", payload, err)
+	}
+	if _, err := buildActionPayload("restore", ""); err == nil {
+		t.Fatal("restore without backup_id should be rejected")
+	}
+	backup, err := buildActionPayload("backup", "")
+	if err != nil || backup["action"] != "backup" {
+		t.Fatalf("backup payload should not require backup_id: %#v, %v", backup, err)
+	}
+}

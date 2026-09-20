@@ -248,6 +248,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Job' }
+        '400': { description: Invalid action request. }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/jobs/{id}:

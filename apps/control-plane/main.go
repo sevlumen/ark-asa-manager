@@ -892,6 +892,17 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "not_found", "unsupported action")
 		return
 	}
+	var input struct {
+		BackupID string `json:"backup_id"`
+	}
+	if r.ContentLength != 0 && !decodeJSON(w, r, &input) {
+		return
+	}
+	payloadValues, err := buildActionPayload(action, input.BackupID)
+	if err != nil {
+		writeError(w, 400, "invalid_request", err.Error())
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var exists bool
 	if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM instances WHERE id=$1)`, id).Scan(&exists); err != nil || !exists {
@@ -903,7 +914,7 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not create job")
 		return
 	}
-	payload, _ := json.Marshal(map[string]string{"action": action})
+	payload, _ := json.Marshal(payloadValues)
 	if _, err = s.db.Exec(r.Context(), `INSERT INTO jobs (id,instance_id,kind,payload,created_by) VALUES ($1,$2,$3,$4,$5)`, jobID, id, action, payload, p.ID); err != nil {
 		writeError(w, 500, "internal_error", "could not enqueue job")
 		return
@@ -916,6 +927,17 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 	s.appendEvent(r.Context(), "job.queued", "job", jobID, map[string]any{"instance_id": id, "kind": action})
 	s.recordAudit(r.Context(), p.Username, "instance.action", "instance:"+id, map[string]any{"action": action, "outcome": "allowed", "job_id": jobID})
 	writeJSON(w, 202, map[string]any{"id": jobID, "status": "queued", "instance_id": id, "kind": action})
+}
+
+func buildActionPayload(action, backupID string) (map[string]string, error) {
+	payload := map[string]string{"action": action}
+	if backupID != "" {
+		payload["backup_id"] = backupID
+	}
+	if action == "restore" && strings.TrimSpace(backupID) == "" {
+		return nil, errors.New("backup_id is required for restore")
+	}
+	return payload, nil
 }
 
 func (s *server) jobs(w http.ResponseWriter, r *http.Request) {
