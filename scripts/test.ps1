@@ -40,4 +40,8 @@ try {
   Pop-Location
 }
 
+Write-Host '[proxy] websocket reverse-proxy contract'
+& (Join-Path $root 'tests/runtime/proxy_contract.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'proxy contract failed' }
+
 Write-Host 'All local test suites passed.'
