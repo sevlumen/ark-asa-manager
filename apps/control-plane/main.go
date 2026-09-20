@@ -129,6 +129,7 @@ func main() {
 			r.Patch("/instances/{id}", s.updateInstance)
 			r.Post("/instances", s.createInstance)
 			r.Post("/instances/{id}/actions/{action}", s.action)
+			r.Get("/backups", s.backups)
 			r.Get("/jobs", s.jobs)
 			r.Get("/jobs/{id}", s.job)
 			r.Get("/audit", s.audit)
@@ -319,17 +320,66 @@ func (s *server) agentComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	result, err := s.db.Exec(r.Context(), `UPDATE jobs SET status='succeeded',lease_owner=NULL,lease_expires_at=NULL,finished_at=now(),last_error=NULL WHERE id=$1 AND lease_owner=$2`, id, nodeID)
+	var input struct {
+		Result *struct {
+			ID        string `json:"id"`
+			ObjectKey string `json:"object_key"`
+			Sha256    string `json:"sha256"`
+			Bytes     int64  `json:"bytes"`
+		} `json:"result"`
+	}
+	if r.ContentLength != 0 && !decodeJSON(w, r, &input) {
+		return
+	}
+	tx, err := s.db.Begin(r.Context())
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not complete job")
 		return
 	}
-	if result.RowsAffected() != 1 {
+	defer tx.Rollback(r.Context())
+	var instanceID, kind string
+	var createdBy *string
+	err = tx.QueryRow(r.Context(), `UPDATE jobs SET status='succeeded',lease_owner=NULL,lease_expires_at=NULL,finished_at=now(),last_error=NULL WHERE id=$1 AND lease_owner=$2 RETURNING instance_id,kind,created_by`, id, nodeID).Scan(&instanceID, &kind, &createdBy)
+	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 409, "conflict", "job lease is no longer owned by this agent")
 		return
 	}
-	s.appendEvent(r.Context(), "job.succeeded", "job", id, map[string]any{"owner": nodeID})
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not complete job")
+		return
+	}
+	if input.Result != nil {
+		if kind != "backup" || !validBackupRecord(input.Result.ID, input.Result.ObjectKey, input.Result.Sha256, input.Result.Bytes) {
+			writeError(w, 400, "invalid_request", "invalid backup result")
+			return
+		}
+		if _, err = tx.Exec(r.Context(), `INSERT INTO backups (id,instance_id,backend,object_key,sha256,bytes,verified_at,created_by) VALUES ($1,$2,'local',$3,$4,$5,now(),$6)`, input.Result.ID, instanceID, input.Result.ObjectKey, input.Result.Sha256, input.Result.Bytes, createdBy); err != nil {
+			writeError(w, 500, "internal_error", "could not record backup")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		writeError(w, 500, "internal_error", "could not complete job")
+		return
+	}
+	event := map[string]any{"owner": nodeID}
+	if input.Result != nil {
+		event["backup_id"] = input.Result.ID
+	}
+	s.appendEvent(r.Context(), "job.succeeded", "job", id, event)
 	writeJSON(w, 200, map[string]string{"status": "succeeded", "id": id})
+}
+
+func validBackupRecord(id, objectKey, sha string, bytes int64) bool {
+	if !validBackupName(id) || id != objectKey || len(sha) != 64 || bytes < 1 {
+		return false
+	}
+	_, err := hex.DecodeString(sha)
+	return err == nil
+}
+
+func validBackupName(value string) bool {
+	return value != "" && !strings.ContainsAny(value, `/\\`) && strings.HasSuffix(value, ".tar.gz")
 }
 
 func (s *server) agentFail(w http.ResponseWriter, r *http.Request) {
@@ -1062,6 +1112,62 @@ func buildActionPayload(action, backupID string) (map[string]string, error) {
 		return nil, errors.New("backup_id is required for restore")
 	}
 	return payload, nil
+}
+
+func (s *server) backups(w http.ResponseWriter, r *http.Request) {
+	limit := parseLimit(r.URL.Query().Get("limit"))
+	parts, err := decodeCursor(r.URL.Query().Get("cursor"), 2)
+	if cursorError(w, err) {
+		return
+	}
+	where := make([]string, 0, 2)
+	args := []any{limit + 1}
+	nextArg := 2
+	if instanceID := strings.TrimSpace(r.URL.Query().Get("instance_id")); instanceID != "" {
+		where = append(where, fmt.Sprintf("instance_id=$%d", nextArg))
+		args = append(args, instanceID)
+		nextArg++
+	}
+	if len(parts) == 2 {
+		createdAt, parseErr := time.Parse(time.RFC3339Nano, parts[0])
+		if parseErr != nil {
+			cursorError(w, parseErr)
+			return
+		}
+		where = append(where, fmt.Sprintf("(created_at,id)<($%d,$%d)", nextArg, nextArg+1))
+		args = append(args, createdAt, parts[1])
+	}
+	query := `SELECT id,instance_id,backend,object_key,sha256,bytes,verified_at,created_by,created_at FROM backups`
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	query += " ORDER BY created_at DESC,id DESC LIMIT $1"
+	rows, err := s.db.Query(r.Context(), query, args...)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not list backups")
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0, limit+1)
+	for rows.Next() {
+		var id, instanceID, backend, objectKey, sha256Value string
+		var bytes int64
+		var verifiedAt *time.Time
+		var createdAt time.Time
+		var createdBy *string
+		if err := rows.Scan(&id, &instanceID, &backend, &objectKey, &sha256Value, &bytes, &verifiedAt, &createdBy, &createdAt); err != nil {
+			writeError(w, 500, "internal_error", "could not read backups")
+			return
+		}
+		items = append(items, map[string]any{"id": id, "instance_id": instanceID, "backend": backend, "object_key": objectKey, "sha256": sha256Value, "bytes": bytes, "verified_at": verifiedAt, "created_by": createdBy, "created_at": createdAt})
+	}
+	next := ""
+	if len(items) > limit {
+		createdAt := items[limit-1]["created_at"].(time.Time)
+		next = encodeCursor(createdAt.Format(time.RFC3339Nano), items[limit-1]["id"].(string))
+		items = items[:limit]
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
 }
 
 func (s *server) jobs(w http.ResponseWriter, r *http.Request) {

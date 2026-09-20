@@ -1,7 +1,11 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 )
@@ -38,5 +42,46 @@ func TestLifecycleActionPathSupportsUpdateThroughRestart(t *testing.T) {
 func TestLifecycleActionPathRejectsUnsupportedActions(t *testing.T) {
 	if _, err := lifecycleActionPath("backup", "container-123"); err == nil {
 		t.Fatal("backup must remain unsupported until a safe archive worker exists")
+	}
+}
+
+func TestValidBackupNameRejectsTraversal(t *testing.T) {
+	for _, name := range []string{"", "../save.tar.gz", "/tmp/save.tar.gz", "save.zip"} {
+		if validBackupName(name) {
+			t.Fatalf("backup name %q should be rejected", name)
+		}
+	}
+	if !validBackupName("ark-save-20260921T000000Z-job.tar.gz") {
+		t.Fatal("valid backup name was rejected")
+	}
+}
+
+func TestRepackBackupTarRejectsTraversal(t *testing.T) {
+	var compressed bytes.Buffer
+	gz := gzip.NewWriter(&compressed)
+	tarWriter := tar.NewWriter(gz)
+	if err := tarWriter.WriteHeader(&tar.Header{Name: "../escape.txt", Mode: 0600, Size: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tarWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.CreateTemp("", "unsafe-backup-*.tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := file.Name()
+	defer os.Remove(name)
+	if _, err = file.Write(compressed.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err = file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = repackBackupTar(name, &bytes.Buffer{}); err == nil {
+		t.Fatal("restore archive path traversal was accepted")
 	}
 }

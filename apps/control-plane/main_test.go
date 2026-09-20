@@ -234,6 +234,18 @@ func TestDesiredStateForAction(t *testing.T) {
 	}
 }
 
+func TestValidBackupRecord(t *testing.T) {
+	if !validBackupRecord("save.tar.gz", "save.tar.gz", strings.Repeat("a", 64), 1) {
+		t.Fatal("valid backup record was rejected")
+	}
+	if validBackupRecord("save.tar.gz", "other.tar.gz", strings.Repeat("a", 64), 1) {
+		t.Fatal("mismatched backup object key was accepted")
+	}
+	if validBackupRecord("save.tar.gz", "save.tar.gz", "not-a-sha", 1) {
+		t.Fatal("invalid backup digest was accepted")
+	}
+}
+
 func TestDecodeHeartbeatPayloadRejectsMalformedJSON(t *testing.T) {
 	if _, err := decodeHeartbeatPayload(strings.NewReader("{not-json")); err == nil {
 		t.Fatal("malformed heartbeat JSON should be rejected")

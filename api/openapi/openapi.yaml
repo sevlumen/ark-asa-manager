@@ -266,6 +266,35 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Job' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/backups:
+    get:
+      tags: [backups]
+      operationId: listBackups
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - name: instance_id
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Verified local backups.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Backup' }
+                  next_cursor: { type: string, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/jobs:
     get:
       tags: [jobs]
@@ -536,6 +565,19 @@ components:
       type: object
       properties:
         backup_id: { type: string }
+    Backup:
+      type: object
+      required: [id, instance_id, backend, object_key, sha256, bytes, created_at]
+      properties:
+        id: { type: string }
+        instance_id: { type: string }
+        backend: { type: string, enum: [local, s3, r2] }
+        object_key: { type: string }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        bytes: { type: integer, format: int64, minimum: 1 }
+        verified_at: { type: string, format: date-time, nullable: true }
+        created_by: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
     Job:
       type: object
       required: [id, kind, status, created_at]
