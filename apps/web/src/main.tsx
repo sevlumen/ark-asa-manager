@@ -27,10 +27,11 @@ function App() {
   }, []);
   useEffect(() => { const onPopState = () => setPage(pageFromPath(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
   useEffect(() => { const onExpired = () => { window.history.replaceState({}, "", "/"); setPage("overview"); setUser(null); }; window.addEventListener("ark:session-expired", onExpired); return () => window.removeEventListener("ark:session-expired", onExpired); }, []);
-  useEffect(() => { if (!checking && !user && window.location.pathname !== "/") { window.history.replaceState({}, "", "/"); setPage("overview"); } }, [checking, user]);
+  useEffect(() => { if (!checking && !user && window.location.pathname !== "/" && window.location.pathname !== "/login") { window.history.replaceState({}, "", "/login"); setPage("overview"); } }, [checking, user]);
+  useEffect(() => { if (user && window.location.pathname === "/login") { window.history.replaceState({}, "", "/"); setPage("overview"); } }, [user]);
   useEffect(() => { if (user) void api<any>("/system/health").then(r => setNodeHealth(r.agent || "unknown")).catch(() => setNodeHealth("unknown")); }, [user]);
   if (checking) return <div className="loading-screen"><div className="spinner" />Loading console</div>;
-  if (!user) return <Login onLogin={setUser} />;
+  if (!user) return <Login onLogin={next => { window.history.replaceState({}, "", "/"); setPage("overview"); setUser(next); }} />;
   async function logout() { await api("/auth/logout", { method: "POST", headers: { "X-CSRF-Token": await csrfToken() } }).catch(() => undefined); setUser(null); }
   function navigate(next: string) { window.history.pushState({}, "", next === "overview" ? "/" : `/${next}`); setPage(next); }
   return <div className="app-shell"><Sidebar page={page} setPage={navigate} user={user} logout={logout} nodeHealth={nodeHealth} /><main className="content"><header className="topbar"><div><p className="eyebrow">CONTROL PLANE / LOCAL</p><h1>{page === "overview" ? "Good evening, " + user.username : pageLabel(page)}</h1></div><div className="top-actions"><span className="live-pill"><i /> Live</span><div className="avatar">{user.username.slice(0, 1).toUpperCase()}</div></div></header>{page === "overview" && <Overview user={user} />}{page === "servers" && <Servers user={user} />}{page === "jobs" && <Jobs />}{page === "audit" && <Audit />}{page === "users" && (user.role === "admin" ? <Users /> : <ForbiddenPage />)}</main></div>;
