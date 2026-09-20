@@ -192,6 +192,18 @@ func TestAgentIdentityChecksEnrolledCertificateFingerprint(t *testing.T) {
 	}
 }
 
+func TestInstanceStorageMatchesManagedVolumeBoundaries(t *testing.T) {
+	storage := instanceStorage()
+	for _, key := range []string{"mode", "save_path", "config_path", "log_path", "backup_path", "cluster_path"} {
+		if storage[key] == "" {
+			t.Fatalf("storage boundary %q is missing", key)
+		}
+	}
+	if storage["mode"] != "volume" || storage["save_path"] != "/opt/ark/data/save" {
+		t.Fatalf("unexpected storage contract: %#v", storage)
+	}
+}
+
 func TestBuildActionPayloadPreservesBackupID(t *testing.T) {
 	payload, err := buildActionPayload("restore", "backup-123")
 	if err != nil || payload["action"] != "restore" || payload["backup_id"] != "backup-123" {

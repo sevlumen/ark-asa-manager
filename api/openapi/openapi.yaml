@@ -614,8 +614,8 @@ components:
       type: object
       properties:
         desired_state: { type: string, enum: [running, stopped] }
-        player_limit: { type: integer, minimum: 1, maximum: 100 }
-        server_name: { type: string }
+        map: { type: string }
+        cluster_id: { type: string }
     ActionRequest:
       type: object
       properties:

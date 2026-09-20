@@ -1158,7 +1158,7 @@ func (s *server) instances(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "internal_error", "could not decode instance ports")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt, "ports": decodedPorts})
+		items = append(items, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt, "ports": decodedPorts, "storage": instanceStorage()})
 	}
 	next := ""
 	if len(items) > limit {
@@ -1188,7 +1188,18 @@ func (s *server) instance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not decode instance ports")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt, "ports": ports})
+	writeJSON(w, 200, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt, "ports": ports, "storage": instanceStorage()})
+}
+
+func instanceStorage() map[string]string {
+	return map[string]string{
+		"mode":         "volume",
+		"save_path":    "/opt/ark/data/save",
+		"config_path":  "/opt/ark/data/config",
+		"log_path":     "/opt/ark/data/log",
+		"backup_path":  "/opt/ark/data/backups",
+		"cluster_path": "/opt/ark/data/cluster",
+	}
 }
 
 func (s *server) createInstance(w http.ResponseWriter, r *http.Request) {
@@ -1242,12 +1253,22 @@ func (s *server) createInstance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "conflict", "could not allocate instance ports")
 		return
 	}
+	var rawPorts []byte
+	if err = tx.QueryRow(r.Context(), `SELECT COALESCE(jsonb_object_agg(purpose,port),'{}'::jsonb) FROM port_allocations WHERE instance_id=$1 AND node_id=$2`, input.ID, input.NodeID).Scan(&rawPorts); err != nil {
+		writeError(w, 500, "internal_error", "could not read allocated ports")
+		return
+	}
+	ports := map[string]int{}
+	if err = json.Unmarshal(rawPorts, &ports); err != nil {
+		writeError(w, 500, "internal_error", "could not decode allocated ports")
+		return
+	}
 	if err = tx.Commit(r.Context()); err != nil {
 		writeError(w, 500, "internal_error", "could not create instance")
 		return
 	}
 	s.recordAudit(r.Context(), p.Username, "instance.create", "instance:"+input.ID, map[string]any{"outcome": "allowed"})
-	writeJSON(w, 201, map[string]any{"id": input.ID, "node_id": input.NodeID, "map": input.Map, "map_name": input.Map, "cluster_id": input.ClusterID, "desired_state": input.DesiredState, "observed_state": "unknown", "health": "unknown"})
+	writeJSON(w, 201, map[string]any{"id": input.ID, "node_id": input.NodeID, "map": input.Map, "map_name": input.Map, "cluster_id": input.ClusterID, "desired_state": input.DesiredState, "observed_state": "unknown", "health": "unknown", "ports": ports, "storage": instanceStorage()})
 }
 
 func (s *server) updateInstance(w http.ResponseWriter, r *http.Request) {
