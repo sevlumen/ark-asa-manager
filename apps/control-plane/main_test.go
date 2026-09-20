@@ -177,6 +177,15 @@ func TestOverallHealthStatusEscalatesQueryFailures(t *testing.T) {
 	}
 }
 
+func TestAgentLeaseQueryScopesJobsToOwningNode(t *testing.T) {
+	if !strings.Contains(agentLeaseQuery, "JOIN instances i ON i.id=j.instance_id AND i.node_id=$1") {
+		t.Fatal("agent lease query must restrict jobs to the leasing agent's node")
+	}
+	if !strings.Contains(agentLeaseQuery, "FOR UPDATE OF j SKIP LOCKED") {
+		t.Fatal("agent lease query must retain row locking for concurrent agents")
+	}
+}
+
 func TestBuildActionPayloadPreservesBackupID(t *testing.T) {
 	payload, err := buildActionPayload("restore", "backup-123")
 	if err != nil || payload["action"] != "restore" || payload["backup_id"] != "backup-123" {

@@ -273,6 +273,20 @@ func (s *server) agentIdentity(r *http.Request) (string, bool) {
 	return nodeID, true
 }
 
+const agentLeaseQuery = `UPDATE jobs
+SET status='leased', lease_owner=$1, lease_expires_at=now()+interval '60 seconds', attempts=attempts+1, started_at=COALESCE(started_at,now())
+WHERE id=(
+  SELECT j.id
+  FROM jobs j
+  JOIN instances i ON i.id=j.instance_id AND i.node_id=$1
+  WHERE (j.status='queued' OR (j.status IN ('leased','running') AND j.lease_expires_at < now()))
+    AND j.attempts < j.max_attempts
+  ORDER BY j.created_at
+  FOR UPDATE OF j SKIP LOCKED
+  LIMIT 1
+)
+RETURNING id,instance_id,kind,payload,attempts,lease_expires_at`
+
 func (s *server) agentLease(w http.ResponseWriter, r *http.Request) {
 	nodeID, ok := s.agentIdentity(r)
 	if !ok {
@@ -284,7 +298,7 @@ func (s *server) agentLease(w http.ResponseWriter, r *http.Request) {
 	var payload []byte
 	var attempts int
 	var expires time.Time
-	err := s.db.QueryRow(r.Context(), `UPDATE jobs SET status='leased', lease_owner=$1, lease_expires_at=now()+interval '60 seconds', attempts=attempts+1, started_at=COALESCE(started_at,now()) WHERE id=(SELECT id FROM jobs WHERE (status='queued' OR (status IN ('leased','running') AND lease_expires_at < now())) AND attempts < max_attempts ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,instance_id,kind,payload,attempts,lease_expires_at`, nodeID).Scan(&id, &instanceID, &kind, &payload, &attempts, &expires)
+	err := s.db.QueryRow(r.Context(), agentLeaseQuery, nodeID).Scan(&id, &instanceID, &kind, &payload, &attempts, &expires)
 	if errors.Is(err, pgx.ErrNoRows) {
 		w.WriteHeader(http.StatusNoContent)
 		return
