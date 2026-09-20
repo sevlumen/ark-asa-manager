@@ -16,6 +16,16 @@ The web operations console is available at `http://127.0.0.1:3000`. Use it to
 review health, servers, jobs, audit records, nodes, and team access according
 to the signed-in role.
 
+With the stack running, verify the authenticated web surface and CSRF boundary
+without printing the bootstrap secret:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/runtime/web_smoke.ps1
+```
+
+The smoke check logs in using `.secrets/admin_bootstrap_password`, verifies the
+admin API pages, confirms a mutation without CSRF is rejected, and logs out.
+
 For a fresh Ubuntu or Ubuntu-WSL node, `scripts/bootstrap.sh` performs the same
 checks and starts the stack. Build the management CLI without installing Go on
 the host with `scripts/install-arkctl.sh`, then use `.bin/arkctl status` or
