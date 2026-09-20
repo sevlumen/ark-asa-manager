@@ -43,6 +43,13 @@ run:
 powershell -ExecutionPolicy Bypass -File tests/acceptance/node_enrollment.ps1
 ```
 
+To verify viewer/operator permissions and denied-action auditing with temporary
+accounts, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/acceptance/rbac.ps1
+```
+
 On native Windows PowerShell, run `scripts/bootstrap.ps1`; it performs the same
 password generation, ACL protection, build, startup, and readiness checks.
 
