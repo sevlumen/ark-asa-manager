@@ -67,6 +67,14 @@ paths:
                 properties:
                   authenticated: { type: boolean }
                   user: { $ref: '#/components/schemas/Principal' }
+  /api/v1/auth/csrf:
+    get:
+      tags: [auth]
+      operationId: rotateCSRF
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: CSRF cookie rotated. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/system/health:
     get:
       tags: [auth]

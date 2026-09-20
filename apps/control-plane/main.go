@@ -113,6 +113,7 @@ func main() {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireSession)
 			r.Post("/auth/logout", s.logout)
+			r.Get("/auth/csrf", s.rotateCSRF)
 			r.Get("/me", s.me)
 			r.Get("/system/health", s.systemHealth)
 			r.Get("/nodes", s.nodes)
@@ -597,6 +598,30 @@ func (s *server) logout(w http.ResponseWriter, r *http.Request) {
 	s.setCookie(w, csrfCookie, "", false, time.Unix(0, 0))
 	writeJSON(w, 200, map[string]string{"status": "ok"})
 }
+
+func (s *server) rotateCSRF(w http.ResponseWriter, r *http.Request) {
+	session, err := r.Cookie(sessionCookie)
+	if err != nil || session.Value == "" {
+		writeError(w, 401, "unauthorized", "authentication required")
+		return
+	}
+	token, err := randomID()
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not create csrf token")
+		return
+	}
+	result, err := s.db.Exec(r.Context(), `UPDATE sessions SET csrf_hash=$2 WHERE id=$1 AND revoked_at IS NULL AND expires_at > now()`, session.Value, hashToken(token))
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not rotate csrf token")
+		return
+	}
+	if result.RowsAffected() != 1 {
+		writeError(w, 401, "unauthorized", "authentication required")
+		return
+	}
+	s.setCookie(w, csrfCookie, token, false, time.Now().Add(sessionTTL))
+	writeJSON(w, 200, map[string]string{"status": "ok"})
+}
 func (s *server) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"user": currentPrincipal(r)})
 }
@@ -1038,7 +1063,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	return true
 }
 func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+	requestID := w.Header().Get("X-Request-ID")
+	errorBody := map[string]string{"code": code, "message": message}
+	if requestID != "" {
+		errorBody["request_id"] = requestID
+	}
+	writeJSON(w, status, map[string]any{"error": errorBody})
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
