@@ -6,7 +6,7 @@ ARG PROTON_URL=
 ARG VC_REDIST_SHA256=CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B
 ARG VC_REDIST_URL=https://download.visualstudio.microsoft.com/download/pr/bd1c8d9d-ba95-4eee-bc6e-df1fcc876373/CC0FF0EB1DC3F5188AE6300FAEF32BF5BEEBA4BDD6E8E445A9184072096B713B/VC_redist.x64.exe
 
-FROM ubuntu:24.04 AS runtime-bundle
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3 AS runtime-bundle
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG PROTON_VERSION
@@ -40,7 +40,7 @@ RUN proton_url="${PROTON_URL:-https://github.com/GloriousEggroll/proton-ge-custo
     && rm -f /tmp/${PROTON_VERSION}.tar.gz \
     && /usr/local/bin/download-runtime.sh "$VC_REDIST_URL" /opt/ark/vc_redist.x64.exe "$VC_REDIST_SHA256"
 
-FROM ubuntu:24.04
+FROM ubuntu:24.04@sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3
 
 ARG DEBIAN_FRONTEND=noninteractive
 
