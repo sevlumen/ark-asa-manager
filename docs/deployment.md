@@ -31,6 +31,9 @@ checks and starts the stack. Build the management CLI without installing Go on
 the host with `scripts/install-arkctl.sh`, then use `.bin/arkctl status` or
 `.bin/arkctl start` from the repository root.
 
+On native Windows PowerShell, run `scripts/bootstrap.ps1`; it performs the same
+password generation, ACL protection, build, startup, and readiness checks.
+
 The host must provide `/var/run/docker.sock`. The agent receives only the
 restricted, allow-listed Docker API exposed by `socket-proxy`; it is not given
 an unrestricted Docker socket.

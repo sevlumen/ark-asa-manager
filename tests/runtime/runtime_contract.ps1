@@ -10,6 +10,7 @@ $webPackage = Get-Content (Join-Path $root 'apps\web\package.json') -Raw
 $webDockerfile = Get-Content (Join-Path $root 'apps\web\Dockerfile') -Raw
 $envExample = Get-Content (Join-Path $root '.env.example') -Raw
 $bootstrap = Get-Content (Join-Path $root 'scripts\bootstrap.sh') -Raw
+$bootstrapPs = Get-Content (Join-Path $root 'scripts\bootstrap.ps1') -Raw
 $failures = [System.Collections.Generic.List[string]]::new()
 
 function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
@@ -108,6 +109,8 @@ Assert-NotContains $compose 'POSTGRES_PASSWORD:-change-me' 'Compose must not pro
 Assert-NotContains $envExample 'POSTGRES_PASSWORD=change-me' 'Environment example must not contain the unsafe PostgreSQL password.'
 Assert-Contains $compose 'POSTGRES_PASSWORD:?' 'Compose must require an explicit PostgreSQL password.'
 Assert-Contains $bootstrap 'openssl rand -hex 24' 'Bootstrap must generate a PostgreSQL password when creating .env.'
+Assert-Contains $bootstrapPs 'RandomNumberGenerator' 'PowerShell bootstrap must generate a PostgreSQL password with a CSPRNG.'
+Assert-Contains $bootstrapPs 'Set-Acl' 'PowerShell bootstrap must protect the local .env file.'
 Assert-Contains $compose 'PUBLIC_ORIGIN:-http://localhost:3000' 'Control-plane origin must match the web console default.'
 Assert-Contains $envExample 'PUBLIC_ORIGIN=http://localhost:3000' 'Environment example must document the web console origin.'
 
