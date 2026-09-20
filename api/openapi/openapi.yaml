@@ -81,9 +81,11 @@ paths:
                 type: object
                 required: [status, control_plane, database, observed_at]
                 properties:
-                  status: { type: string, enum: [healthy, critical] }
+                  status: { type: string, enum: [healthy, degraded, critical] }
                   control_plane: { type: string }
                   database: { type: string }
+                  agent: { type: string, enum: [unknown, healthy, degraded, critical] }
+                  ark: { type: string, enum: [unknown, healthy, degraded, critical] }
                   observed_at: { type: string, format: date-time }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/nodes:

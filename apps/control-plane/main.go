@@ -18,6 +18,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -48,6 +49,21 @@ type server struct {
 	secure   bool
 	upgrader websocket.Upgrader
 }
+
+type loginThrottleEntry struct {
+	Failures int
+	ResetAt  time.Time
+}
+
+var loginThrottle = struct {
+	sync.Mutex
+	entries map[string]loginThrottleEntry
+}{entries: make(map[string]loginThrottleEntry)}
+
+const (
+	loginThrottleWindow = time.Minute
+	loginThrottleMax    = 5
+)
 
 func main() {
 	ctx := context.Background()
@@ -99,7 +115,12 @@ func main() {
 			r.Post("/auth/logout", s.logout)
 			r.Get("/me", s.me)
 			r.Get("/system/health", s.systemHealth)
+			r.Get("/nodes", s.nodes)
+			r.Get("/nodes/{id}", s.node)
 			r.Get("/instances", s.instances)
+			r.Get("/instances/{id}", s.instance)
+			r.Patch("/instances/{id}", s.updateInstance)
+			r.Post("/instances", s.createInstance)
 			r.Post("/instances/{id}/actions/{action}", s.action)
 			r.Get("/jobs", s.jobs)
 			r.Get("/jobs/{id}", s.job)
@@ -107,6 +128,7 @@ func main() {
 			r.Get("/ws", s.websocket)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireRole("admin"))
+				r.Post("/nodes", s.createNode)
 				r.Get("/users", s.users)
 				r.Post("/users", s.createUser)
 			})
@@ -368,16 +390,164 @@ func (s *server) ready(w http.ResponseWriter, r *http.Request) {
 func (s *server) systemHealth(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
-	status := "healthy"
 	if err := s.db.Ping(ctx); err != nil {
-		status = "critical"
+		writeJSON(w, 200, map[string]any{"status": "critical", "control_plane": "critical", "database": "critical", "agent": "unknown", "ark": "unknown", "observed_at": time.Now().UTC()})
+		return
 	}
-	writeJSON(w, 200, map[string]any{"status": status, "control_plane": status, "database": status, "observed_at": time.Now().UTC()})
+	agentStatus := "unknown"
+	var online int
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM nodes WHERE status='online' AND last_heartbeat > now() - interval '30 seconds'`).Scan(&online)
+	if online > 0 {
+		agentStatus = "healthy"
+	} else {
+		var nodes int
+		_ = s.db.QueryRow(ctx, `SELECT count(*) FROM nodes`).Scan(&nodes)
+		if nodes > 0 {
+			agentStatus = "degraded"
+		}
+	}
+	arkStatus := "unknown"
+	var instances, unhealthy int
+	if err := s.db.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE COALESCE(st.health,'unknown') <> 'healthy') FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id`).Scan(&instances, &unhealthy); err == nil && instances > 0 {
+		arkStatus = "healthy"
+		if unhealthy > 0 {
+			arkStatus = "degraded"
+		}
+	}
+	status := "healthy"
+	if agentStatus != "healthy" || (instances > 0 && arkStatus != "healthy") {
+		status = "degraded"
+	}
+	writeJSON(w, 200, map[string]any{"status": status, "control_plane": "healthy", "database": "healthy", "agent": agentStatus, "ark": arkStatus, "observed_at": time.Now().UTC()})
+}
+
+func requestIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil && host != "" {
+		return host
+	}
+	if r.RemoteAddr != "" {
+		return r.RemoteAddr
+	}
+	return "unknown"
+}
+
+func loginKeys(ip, username string) []string {
+	return []string{"ip:" + ip, "username:" + strings.ToLower(strings.TrimSpace(username))}
+}
+
+func loginBlocked(ip, username string) bool {
+	now := time.Now()
+	loginThrottle.Lock()
+	defer loginThrottle.Unlock()
+	blocked := false
+	for _, key := range loginKeys(ip, username) {
+		entry, ok := loginThrottle.entries[key]
+		if !ok || now.After(entry.ResetAt) {
+			continue
+		}
+		if entry.Failures >= loginThrottleMax {
+			blocked = true
+		}
+	}
+	return blocked
+}
+
+func noteLoginFailure(ip, username string) {
+	now := time.Now()
+	loginThrottle.Lock()
+	defer loginThrottle.Unlock()
+	for key, entry := range loginThrottle.entries {
+		if now.After(entry.ResetAt) {
+			delete(loginThrottle.entries, key)
+		}
+	}
+	for _, key := range loginKeys(ip, username) {
+		entry := loginThrottle.entries[key]
+		if now.After(entry.ResetAt) {
+			entry = loginThrottleEntry{ResetAt: now.Add(loginThrottleWindow)}
+		}
+		entry.Failures++
+		loginThrottle.entries[key] = entry
+	}
+}
+
+func clearLoginFailures(ip, username string) {
+	loginThrottle.Lock()
+	defer loginThrottle.Unlock()
+	for _, key := range loginKeys(ip, username) {
+		delete(loginThrottle.entries, key)
+	}
+}
+
+func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.Query(r.Context(), `SELECT id,name,endpoint,status,last_heartbeat,created_at FROM nodes ORDER BY name`)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not list nodes")
+		return
+	}
+	defer rows.Close()
+	items := make([]map[string]any, 0)
+	for rows.Next() {
+		var id, name, endpoint, status string
+		var heartbeat, created *time.Time
+		if err := rows.Scan(&id, &name, &endpoint, &status, &heartbeat, &created); err != nil {
+			writeError(w, 500, "internal_error", "could not read nodes")
+			return
+		}
+		items = append(items, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": status, "last_heartbeat": heartbeat, "created_at": created})
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "count": len(items)})
+}
+
+func (s *server) node(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var name, endpoint, status string
+	var heartbeat, created *time.Time
+	err := s.db.QueryRow(r.Context(), `SELECT name,endpoint,status,last_heartbeat,created_at FROM nodes WHERE id=$1`, id).Scan(&name, &endpoint, &status, &heartbeat, &created)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 404, "not_found", "node not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not read node")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": status, "last_heartbeat": heartbeat, "created_at": created})
+}
+
+func (s *server) createNode(w http.ResponseWriter, r *http.Request) {
+	var input struct{ ID, Name, Endpoint string }
+	if !decodeJSON(w, r, &input) || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Endpoint) == "" {
+		writeError(w, 400, "invalid_request", "name and endpoint are required")
+		return
+	}
+	id := strings.TrimSpace(input.ID)
+	if id == "" {
+		id, _ = randomID()
+	}
+	if _, err := s.db.Exec(r.Context(), `INSERT INTO nodes (id,name,endpoint) VALUES ($1,$2,$3)`, id, strings.TrimSpace(input.Name), strings.TrimSpace(input.Endpoint)); err != nil {
+		writeError(w, 409, "conflict", "node already exists")
+		return
+	}
+	p := currentPrincipal(r)
+	s.recordAudit(r.Context(), p.Username, "node.create", "node:"+id, map[string]any{"outcome": "allowed"})
+	writeJSON(w, 201, map[string]any{"id": id, "name": strings.TrimSpace(input.Name), "endpoint": strings.TrimSpace(input.Endpoint), "status": "unknown", "last_heartbeat": nil})
 }
 
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	var input struct{ Username, Password string }
-	if !decodeJSON(w, r, &input) || input.Username == "" || input.Password == "" {
+	if !decodeJSON(w, r, &input) {
+		noteLoginFailure(requestIP(r), "")
+		return
+	}
+	if input.Username == "" || input.Password == "" {
+		noteLoginFailure(requestIP(r), input.Username)
+		writeError(w, 401, "unauthorized", "invalid credentials")
+		return
+	}
+	if loginBlocked(requestIP(r), input.Username) {
+		s.recordAudit(r.Context(), "anonymous", "auth.login_throttled", "user:"+input.Username, map[string]any{"outcome": "denied"})
 		writeError(w, 401, "unauthorized", "invalid credentials")
 		return
 	}
@@ -390,10 +560,12 @@ func (s *server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil || disabled != nil || !verifyPassword(input.Password, passwordHash) {
+		noteLoginFailure(requestIP(r), input.Username)
 		s.recordAudit(r.Context(), "anonymous", "auth.login_failed", "user:"+input.Username, map[string]any{"outcome": "denied"})
 		writeError(w, 401, "unauthorized", "invalid credentials")
 		return
 	}
+	clearLoginFailures(requestIP(r), input.Username)
 	p.Capabilities = roleCapabilities(p.Role)
 	sessionID, err := randomID()
 	if err != nil {
@@ -457,6 +629,93 @@ func (s *server) instances(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"items": items, "count": len(items)})
 }
+
+func (s *server) instance(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var node, mapName, cluster, desired, observed, health string
+	var lastError *string
+	var observedAt time.Time
+	err := s.db.QueryRow(r.Context(), `SELECT i.node_id,i.map_name,i.cluster_id,i.desired_state,COALESCE(st.observed_state,'unknown'),COALESCE(st.health,'unknown'),st.last_error,COALESCE(st.observed_at,i.updated_at) FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id WHERE i.id=$1`, id).Scan(&node, &mapName, &cluster, &desired, &observed, &health, &lastError, &observedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 404, "not_found", "instance not found")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not read instance")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt})
+}
+
+func (s *server) createInstance(w http.ResponseWriter, r *http.Request) {
+	p := currentPrincipal(r)
+	if p.Role == "viewer" {
+		s.denied(w, r, "instance.create")
+		return
+	}
+	var input struct {
+		ID           string `json:"id"`
+		NodeID       string `json:"node_id"`
+		ClusterID    string `json:"cluster_id"`
+		Map          string `json:"map"`
+		DesiredState string `json:"desired_state"`
+	}
+	if !decodeJSON(w, r, &input) || strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.NodeID) == "" || strings.TrimSpace(input.ClusterID) == "" {
+		writeError(w, 400, "invalid_request", "id, node_id, and cluster_id are required")
+		return
+	}
+	if input.Map == "" {
+		input.Map = "TheIsland_WP"
+	}
+	if input.DesiredState == "" {
+		input.DesiredState = "stopped"
+	}
+	if input.DesiredState != "running" && input.DesiredState != "stopped" {
+		writeError(w, 400, "invalid_request", "desired_state must be running or stopped")
+		return
+	}
+	_, err := s.db.Exec(r.Context(), `INSERT INTO instances (id,node_id,map_name,cluster_id,desired_state) VALUES ($1,$2,$3,$4,$5)`, input.ID, input.NodeID, input.Map, input.ClusterID, input.DesiredState)
+	if err != nil {
+		writeError(w, 409, "conflict", "instance or node does not exist")
+		return
+	}
+	_, _ = s.db.Exec(r.Context(), `INSERT INTO instance_status (instance_id) VALUES ($1) ON CONFLICT DO NOTHING`, input.ID)
+	s.recordAudit(r.Context(), p.Username, "instance.create", "instance:"+input.ID, map[string]any{"outcome": "allowed"})
+	writeJSON(w, 201, map[string]any{"id": input.ID, "node_id": input.NodeID, "map": input.Map, "map_name": input.Map, "cluster_id": input.ClusterID, "desired_state": input.DesiredState, "observed_state": "unknown", "health": "unknown"})
+}
+
+func (s *server) updateInstance(w http.ResponseWriter, r *http.Request) {
+	p := currentPrincipal(r)
+	if p.Role == "viewer" {
+		s.denied(w, r, "instance.update")
+		return
+	}
+	var input struct {
+		DesiredState string `json:"desired_state"`
+		Map          string `json:"map"`
+		ClusterID    string `json:"cluster_id"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if input.DesiredState != "" && input.DesiredState != "running" && input.DesiredState != "stopped" {
+		writeError(w, 400, "invalid_request", "desired_state must be running or stopped")
+		return
+	}
+	_, err := s.db.Exec(r.Context(), `UPDATE instances SET desired_state=COALESCE(NULLIF($2,''),desired_state),map_name=COALESCE(NULLIF($3,''),map_name),cluster_id=COALESCE(NULLIF($4,''),cluster_id),updated_at=now() WHERE id=$1`, id, input.DesiredState, input.Map, input.ClusterID)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not update instance")
+		return
+	}
+	var exists bool
+	if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM instances WHERE id=$1)`, id).Scan(&exists); err != nil || !exists {
+		writeError(w, 404, "not_found", "instance not found")
+		return
+	}
+	s.recordAudit(r.Context(), p.Username, "instance.update", "instance:"+id, map[string]any{"outcome": "allowed"})
+	s.instance(w, r)
+}
 func (s *server) action(w http.ResponseWriter, r *http.Request) {
 	p := currentPrincipal(r)
 	if p.Role == "viewer" {
@@ -483,6 +742,11 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 	if _, err = s.db.Exec(r.Context(), `INSERT INTO jobs (id,instance_id,kind,payload,created_by) VALUES ($1,$2,$3,$4,$5)`, jobID, id, action, payload, p.ID); err != nil {
 		writeError(w, 500, "internal_error", "could not enqueue job")
 		return
+	}
+	if action == "start" || action == "restart" {
+		_, _ = s.db.Exec(r.Context(), `UPDATE instances SET desired_state='running',updated_at=now() WHERE id=$1`, id)
+	} else if action == "stop" {
+		_, _ = s.db.Exec(r.Context(), `UPDATE instances SET desired_state='stopped',updated_at=now() WHERE id=$1`, id)
 	}
 	s.appendEvent(r.Context(), "job.queued", "job", jobID, map[string]any{"instance_id": id, "kind": action})
 	s.recordAudit(r.Context(), p.Username, "instance.action", "instance:"+id, map[string]any{"action": action, "outcome": "allowed", "job_id": jobID})
