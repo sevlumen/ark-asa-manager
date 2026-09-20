@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -304,6 +305,34 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if result.RowsAffected() != 1 {
 		writeError(w, 404, "not_found", "node not found")
 		return
+	}
+	var input struct {
+		Instances []struct {
+			InstanceID    string `json:"instance_id"`
+			ContainerID   string `json:"container_id"`
+			ObservedState string `json:"observed_state"`
+			Health        string `json:"health"`
+		} `json:"instances"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, 400, "invalid_request", "invalid heartbeat payload")
+		return
+	}
+	for _, instance := range input.Instances {
+		if instance.InstanceID == "" {
+			continue
+		}
+		if instance.ObservedState == "" {
+			instance.ObservedState = "unknown"
+		}
+		if instance.Health == "" {
+			instance.Health = "unknown"
+		}
+		_, err := s.db.Exec(r.Context(), `UPDATE instance_status st SET observed_state=$2,container_id=$3,health=$4,last_error=NULL,observed_at=now() FROM instances i WHERE st.instance_id=i.id AND i.node_id=$5 AND st.instance_id=$1`, instance.InstanceID, instance.ObservedState, instance.ContainerID, instance.Health, nodeID)
+		if err != nil {
+			writeError(w, 500, "internal_error", "could not update instance heartbeat")
+			return
+		}
 	}
 	writeJSON(w, 200, map[string]any{"node_id": nodeID, "status": "online", "observed_at": time.Now().UTC()})
 }

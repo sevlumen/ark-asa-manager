@@ -57,6 +57,16 @@ Assert-NotContains $entrypoint '?RCONEnabled=True?RCONPort=' 'Entrypoint must no
 
 $image = 'ark-asa-runtime:local'
 if (docker image inspect $image 2>$null) {
+    $runtimeContainer = docker ps --filter "ancestor=$image" --filter 'status=running' --format '{{.ID}}' | Select-Object -First 1
+    if (-not $runtimeContainer) {
+        $failures.Add('Runtime secret probes require a running container for the inspected image.')
+    }
+    function Invoke-DockerBashScript([string]$Script) {
+        $bytes = [Text.Encoding]::UTF8.GetBytes(($Script -replace "`r", ''))
+        $encoded = [Convert]::ToBase64String($bytes)
+        docker exec $runtimeContainer bash -c "echo $encoded | base64 -d | bash -s"
+    }
+
     $configProbe = @'
 source /usr/local/bin/secrets.sh
 config=$(mktemp)
@@ -72,8 +82,7 @@ write_ark_passwords_config "$config" "" ""
 ! grep -q '^ServerAdminPassword=' "$config"
 ! grep -q '^ServerPassword=' "$config"
 '@
-    $configProbe = $configProbe -replace "`r", ''
-    docker run --rm --entrypoint bash $image -c $configProbe
+    Invoke-DockerBashScript $configProbe
     if ($LASTEXITCODE -ne 0) {
         $failures.Add('Runtime config probe must write file-backed passwords with restrictive permissions.')
     }
@@ -87,8 +96,7 @@ ARK launch args ServerAdminPassword=fake-runtime-secret ServerPassword=fake-serv
 RCON connection password=fake-runtime-secret
 LOG
 '@
-    $probe = $probe -replace "`r", ''
-    $redacted = docker run --rm --entrypoint bash $image -c $probe
+    $redacted = Invoke-DockerBashScript $probe
     if ($LASTEXITCODE -ne 0 -or $redacted -match 'fake-runtime-secret|fake-server-password|fake-steam-password' -or ($redacted -split "`r?`n").Count -lt 3) {
         $failures.Add('Runtime image redaction probe must hide fake secrets across all representative runtime log lines.')
     }

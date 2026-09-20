@@ -32,6 +32,16 @@ type container struct {
 	ID     string            `json:"Id"`
 	State  string            `json:"State"`
 	Labels map[string]string `json:"Labels"`
+	Health *containerHealth  `json:"Health"`
+}
+type containerHealth struct {
+	Status string `json:"Status"`
+}
+type observedInstance struct {
+	InstanceID    string `json:"instance_id"`
+	ContainerID   string `json:"container_id"`
+	ObservedState string `json:"observed_state"`
+	Health        string `json:"health"`
 }
 
 func main() {
@@ -91,8 +101,33 @@ func (a *agent) publicHealth(r *http.Request) error {
 	return nil
 }
 func (a *agent) heartbeat() error {
+	var containers []container
+	filter := url.QueryEscape(fmt.Sprintf(`{"label":["ark.platform.node-id=%s"]}`, a.cfg.nodeID))
+	if err := a.dockerJSON(http.MethodGet, "/containers/json?all=true&filters="+filter, nil, &containers); err != nil {
+		return fmt.Errorf("discover managed containers: %w", err)
+	}
+	instances := make([]observedInstance, 0, len(containers))
+	for _, item := range containers {
+		instanceID := item.Labels["ark.platform.instance-id"]
+		if instanceID == "" {
+			continue
+		}
+		health := "unknown"
+		if item.Health != nil && item.Health.Status != "" {
+			health = item.Health.Status
+		}
+		state := item.State
+		if state == "exited" {
+			state = "stopped"
+		}
+		instances = append(instances, observedInstance{InstanceID: instanceID, ContainerID: item.ID, ObservedState: state, Health: health})
+	}
+	body, err := json.Marshal(map[string]any{"instances": instances})
+	if err != nil {
+		return err
+	}
 	var out map[string]any
-	return a.controlJSON(http.MethodPost, "/internal/agent/heartbeat", nil, &out)
+	return a.controlJSON(http.MethodPost, "/internal/agent/heartbeat", bytes.NewReader(body), &out)
 }
 func (a *agent) poll() error {
 	var response job
