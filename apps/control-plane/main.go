@@ -1189,8 +1189,23 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_, err := s.db.Exec(r.Context(), `UPDATE users SET role=COALESCE($2,role), disabled_at=CASE WHEN $3::boolean IS NULL THEN disabled_at WHEN $3 THEN now() ELSE NULL END, updated_at=now() WHERE id=$1`, id, input.Role, input.Disabled)
+	tx, err := s.db.Begin(r.Context())
 	if err != nil {
+		writeError(w, 500, "internal_error", "could not update user")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, err = tx.Exec(r.Context(), `UPDATE users SET role=COALESCE($2,role), disabled_at=CASE WHEN $3::boolean IS NULL THEN disabled_at WHEN $3 THEN now() ELSE NULL END, updated_at=now() WHERE id=$1`, id, input.Role, input.Disabled); err != nil {
+		writeError(w, 500, "internal_error", "could not update user")
+		return
+	}
+	if input.Disabled != nil && *input.Disabled {
+		if _, err = tx.Exec(r.Context(), `UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, id); err != nil {
+			writeError(w, 500, "internal_error", "could not revoke user sessions")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
 		writeError(w, 500, "internal_error", "could not update user")
 		return
 	}
