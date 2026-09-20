@@ -100,9 +100,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	s := &server{db: db, secure: strings.HasPrefix(strings.ToLower(os.Getenv("PUBLIC_ORIGIN")), "https://"), upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		return origin == "" || origin == os.Getenv("PUBLIC_ORIGIN")
+	publicOrigin := os.Getenv("PUBLIC_ORIGIN")
+	s := &server{db: db, secure: strings.HasPrefix(strings.ToLower(publicOrigin), "https://"), upgrader: websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
+		return websocketOriginAllowed(r, publicOrigin, r.Header.Get("Origin"))
 	}}}
 	if err := s.bootstrapAdmin(ctx); err != nil {
 		log.Fatal(err)
@@ -1883,6 +1883,17 @@ func (s *server) websocket(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 		}
 	}
+}
+
+func websocketOriginAllowed(r *http.Request, configuredOrigin, origin string) bool {
+	if origin == "" || origin == configuredOrigin {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	return strings.EqualFold(parsed.Host, r.Host)
 }
 
 func (s *server) appendEvent(ctx context.Context, eventType, resourceType, resourceID string, payload map[string]any) {

@@ -31,6 +31,15 @@ powershell -ExecutionPolicy Bypass -File tests/runtime/web_smoke.ps1
 The smoke check logs in using `.secrets/admin_bootstrap_password`, verifies the
 admin API pages, confirms a mutation without CSRF is rejected, and logs out.
 
+To verify the reverse-proxy WebSocket contract before enabling the Nginx profile:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/runtime/proxy_contract.ps1
+```
+
+The Nginx profile explicitly forwards the HTTP/1.1 WebSocket upgrade for the
+realtime `/api/v1/ws` stream.
+
 For a fresh Ubuntu or Ubuntu-WSL node, `scripts/bootstrap.sh` performs the same
 checks and starts the stack. Build the management CLI without installing Go on
 the host with `scripts/install-arkctl.sh`, then use `.bin/arkctl status` or

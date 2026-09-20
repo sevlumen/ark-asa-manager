@@ -7,7 +7,8 @@ foreach ($required in @(
     'location /api/v1/ws',
     'proxy_http_version 1.1',
     'proxy_set_header Upgrade $http_upgrade',
-    'proxy_set_header Connection "upgrade"'
+    'proxy_set_header Connection "upgrade"',
+    'proxy_set_header Host $http_host'
 )) {
     if ($nginx -notmatch [regex]::Escape($required)) {
         throw "Nginx WebSocket proxy contract is missing: $required"
