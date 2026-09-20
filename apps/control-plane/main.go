@@ -661,6 +661,22 @@ func validRole(value string) bool {
 	return value == "admin" || value == "operator" || value == "viewer"
 }
 
+func validInstanceID(value string) bool {
+	if len(value) == 0 || len(value) > 63 {
+		return false
+	}
+	for index, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' || char == '.' {
+			if index == 0 && (char == '-' || char == '.') {
+				return false
+			}
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func currentUserRoleChangeAllowed(targetID, principalID, requestedRole, currentRole string) bool {
 	return targetID != principalID || requestedRole == currentRole
 }
@@ -840,8 +856,14 @@ func (s *server) createInstance(w http.ResponseWriter, r *http.Request) {
 		Map          string `json:"map"`
 		DesiredState string `json:"desired_state"`
 	}
-	if !decodeJSON(w, r, &input) || strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.NodeID) == "" || strings.TrimSpace(input.ClusterID) == "" {
-		writeError(w, 400, "invalid_request", "id, node_id, and cluster_id are required")
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.ID = strings.TrimSpace(input.ID)
+	input.NodeID = strings.TrimSpace(input.NodeID)
+	input.ClusterID = strings.TrimSpace(input.ClusterID)
+	if !validInstanceID(input.ID) || input.NodeID == "" || input.ClusterID == "" {
+		writeError(w, 400, "invalid_request", "id must use 1-63 letters, numbers, dots, underscores, or hyphens; node_id and cluster_id are required")
 		return
 	}
 	if input.Map == "" {

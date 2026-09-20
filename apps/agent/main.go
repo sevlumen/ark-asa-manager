@@ -127,7 +127,7 @@ func (a *agent) publicHealth(r *http.Request) error {
 }
 func (a *agent) heartbeat() error {
 	var containers []container
-	filter := url.QueryEscape(fmt.Sprintf(`{"label":["ark.platform.node-id=%s"]}`, a.cfg.nodeID))
+	filter := dockerLabelFilter("ark.platform.node-id=" + a.cfg.nodeID)
 	if err := a.dockerJSON(http.MethodGet, "/containers/json?all=true&filters="+filter, nil, &containers); err != nil {
 		return fmt.Errorf("discover managed containers: %w", err)
 	}
@@ -186,7 +186,7 @@ func (a *agent) execute(j job) error {
 		return errors.New("job has no instance")
 	}
 	var items []container
-	filter := url.QueryEscape(fmt.Sprintf(`{"label":["ark.platform.instance-id=%s","ark.platform.node-id=%s"]}`, j.InstanceID, a.cfg.nodeID))
+	filter := dockerLabelFilter("ark.platform.instance-id=" + j.InstanceID, "ark.platform.node-id=" + a.cfg.nodeID)
 	if err := a.dockerJSON(http.MethodGet, "/containers/json?all=true&filters="+filter, nil, &items); err != nil {
 		return fmt.Errorf("discover instance container: %w", err)
 	}
@@ -204,6 +204,11 @@ func (a *agent) execute(j job) error {
 	default:
 		return fmt.Errorf("action %q is not implemented by local agent", j.Kind)
 	}
+}
+
+func dockerLabelFilter(labels ...string) string {
+	payload, _ := json.Marshal(map[string][]string{"label": labels})
+	return url.QueryEscape(string(payload))
 }
 
 func (a *agent) controlJSON(method, path string, body io.Reader, out any) error {

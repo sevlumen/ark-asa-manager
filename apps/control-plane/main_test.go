@@ -115,6 +115,19 @@ func TestValidNodeEndpoint(t *testing.T) {
 	}
 }
 
+func TestValidInstanceID(t *testing.T) {
+	for _, value := range []string{"theisland", "cluster_1.eu", "ark-server-2"} {
+		if !validInstanceID(value) {
+			t.Errorf("validInstanceID(%q) = false", value)
+		}
+	}
+	for _, value := range []string{"", ".hidden", "-leading", "has space", `quote"`, strings.Repeat("a", 64)} {
+		if validInstanceID(value) {
+			t.Errorf("validInstanceID(%q) = true", value)
+		}
+	}
+}
+
 func TestUserUpdateGuards(t *testing.T) {
 	if !validRole("admin") || !validRole("operator") || !validRole("viewer") {
 		t.Fatal("expected supported roles to validate")

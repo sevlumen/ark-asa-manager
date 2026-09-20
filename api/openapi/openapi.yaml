@@ -193,6 +193,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Instance' }
+        '400': { description: Invalid instance identifier or required field. }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/instances/{id}:
     parameters:
@@ -519,7 +520,7 @@ components:
       type: object
       required: [id, node_id, cluster_id]
       properties:
-        id: { type: string }
+        id: { type: string, pattern: '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,62}$' }
         node_id: { type: string }
         map: { type: string, default: TheIsland_WP }
         cluster_id: { type: string }
