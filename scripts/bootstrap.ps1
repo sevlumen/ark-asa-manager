@@ -42,17 +42,13 @@ if (-not (Test-Path $adminSecretPath) -or [string]::IsNullOrWhiteSpace((Get-Cont
     Write-Output 'Created the local admin bootstrap secret at .secrets\admin_bootstrap_password.'
 }
 
-# Keep the local environment file private on Windows as well as Unix hosts.
-$acl = Get-Acl $envPath
-$acl.SetAccessRuleProtection($true, $false)
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, 'FullControl', 'Allow')
-$acl.SetAccessRule($rule)
-Set-Acl -Path $envPath -AclObject $acl
-$secretAcl = Get-Acl $adminSecretPath
-$secretAcl.SetAccessRuleProtection($true, $false)
-$secretRule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, 'FullControl', 'Allow')
-$secretAcl.SetAccessRule($secretRule)
-Set-Acl -Path $adminSecretPath -AclObject $secretAcl
+# Keep local configuration and bootstrap credentials private without requiring
+# SeSecurityPrivilege, which is commonly unavailable to standard Windows users.
+foreach ($protectedPath in @($envPath, $adminSecretPath)) {
+    $grant = "${env:USERNAME}:(F)"
+    & icacls $protectedPath /inheritance:r /grant:r $grant | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not protect $protectedPath with icacls." }
+}
 
 docker compose build control-plane agent web
 if ($LASTEXITCODE -ne 0) { throw 'Docker image build failed.' }
