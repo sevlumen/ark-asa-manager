@@ -50,6 +50,13 @@ accounts, run:
 powershell -ExecutionPolicy Bypass -File tests/acceptance/rbac.ps1
 ```
 
+To verify a real save sentinel survives backup, deletion from the save volume,
+and restore while the managed container remains stopped, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/acceptance/backup_restore.ps1
+```
+
 On native Windows PowerShell, run `scripts/bootstrap.ps1`; it performs the same
 password generation, ACL protection, build, startup, and readiness checks.
 
