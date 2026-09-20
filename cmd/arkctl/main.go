@@ -35,7 +35,16 @@ func main() {
 			fmt.Fprintln(os.Stderr, "usage: arkctl restore <backup.tar.gz>")
 			os.Exit(2)
 		}
-		args = restoreCommand(os.Args[2])
+		var err error
+		args, err = restoreCommand(os.Args[2])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if err := ensureInstanceStopped(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -50,15 +59,44 @@ func main() {
 }
 
 func backupCommand() []string {
-	return []string{"run", "--rm", "-v", "ark-asa-platform_ark-save:/src:ro", "-v", "ark-asa-platform_ark-backups:/dst", "alpine:3.20", "sh", "-c", "name=/dst/ark-save-$(date -u +%Y%m%dT%H%M%SZ).tar.gz; tar -czf \"$name\" -C /src .; tar -tzf \"$name\" >/dev/null; echo \"backup=$name\""}
+	saveVolume := getenv("ARK_SAVE_VOLUME", "ark-asa-platform_ark-save")
+	backupVolume := getenv("ARK_BACKUPS_VOLUME", "ark-asa-platform_ark-backups")
+	return []string{"run", "--rm", "-v", saveVolume + ":/src:ro", "-v", backupVolume + ":/dst", "alpine:3.20", "sh", "-c", "name=/dst/ark-save-$(date -u +%Y%m%dT%H%M%SZ).tar.gz; tar -czf \"$name\" -C /src .; tar -tzf \"$name\" >/dev/null; echo \"backup=$name\""}
 }
 
-func restoreCommand(backup string) []string {
-	if backup == "" || filepath.Base(backup) != backup || backup == "." || backup == ".." || !strings.HasSuffix(backup, ".tar.gz") {
-		fmt.Fprintln(os.Stderr, "backup must be a file name ending in .tar.gz")
-		os.Exit(2)
+func restoreCommand(backup string) ([]string, error) {
+	if err := validateBackupName(backup); err != nil {
+		return nil, err
 	}
-	return []string{"run", "--rm", "-v", "ark-asa-platform_ark-save:/dst", "-v", "ark-asa-platform_ark-backups:/src:ro", "alpine:3.20", "sh", "-c", "tar -xzf \"/src/" + backup + "\" -C /dst"}
+	saveVolume := getenv("ARK_SAVE_VOLUME", "ark-asa-platform_ark-save")
+	backupVolume := getenv("ARK_BACKUPS_VOLUME", "ark-asa-platform_ark-backups")
+	return []string{"run", "--rm", "-v", saveVolume + ":/dst", "-v", backupVolume + ":/src:ro", "alpine:3.20", "sh", "-c", "tar -xzf \"/src/" + backup + "\" -C /dst"}, nil
+}
+
+func validateBackupName(backup string) error {
+	if backup == "" || filepath.Base(backup) != backup || backup == "." || backup == ".." || !strings.HasSuffix(backup, ".tar.gz") {
+		return fmt.Errorf("backup must be a file name ending in .tar.gz")
+	}
+	return nil
+}
+
+func ensureInstanceStopped() error {
+	command := exec.Command("docker", "compose", "ps", "--status", "running", "-q", "ark")
+	output, err := command.Output()
+	if err != nil {
+		return fmt.Errorf("could not determine ARK state: %w", err)
+	}
+	if strings.TrimSpace(string(output)) != "" {
+		return fmt.Errorf("refusing restore while the ARK instance is running; run arkctl stop first")
+	}
+	return nil
+}
+
+func getenv(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func exitCode(err error) int {
