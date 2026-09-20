@@ -186,7 +186,7 @@ func (a *agent) execute(j job) error {
 		return errors.New("job has no instance")
 	}
 	var items []container
-	filter := dockerLabelFilter("ark.platform.instance-id=" + j.InstanceID, "ark.platform.node-id=" + a.cfg.nodeID)
+	filter := dockerLabelFilter("ark.platform.instance-id="+j.InstanceID, "ark.platform.node-id="+a.cfg.nodeID)
 	if err := a.dockerJSON(http.MethodGet, "/containers/json?all=true&filters="+filter, nil, &items); err != nil {
 		return fmt.Errorf("discover instance container: %w", err)
 	}
@@ -194,15 +194,25 @@ func (a *agent) execute(j job) error {
 		return fmt.Errorf("no managed container for instance %q", j.InstanceID)
 	}
 	id := items[0].ID
-	switch j.Kind {
+	path, err := lifecycleActionPath(j.Kind, id)
+	if err != nil {
+		return err
+	}
+	return a.dockerAction(http.MethodPost, path, nil)
+}
+
+func lifecycleActionPath(kind, containerID string) (string, error) {
+	switch kind {
 	case "start":
-		return a.dockerAction(http.MethodPost, "/containers/"+id+"/start", nil)
+		return "/containers/" + containerID + "/start", nil
 	case "stop":
-		return a.dockerAction(http.MethodPost, "/containers/"+id+"/stop?t=30", nil)
-	case "restart":
-		return a.dockerAction(http.MethodPost, "/containers/"+id+"/restart?t=30", nil)
+		return "/containers/" + containerID + "/stop?t=30", nil
+	case "restart", "update":
+		// The runtime's update-on-start hook performs the game update before
+		// launching the server, so an update is a graceful restart.
+		return "/containers/" + containerID + "/restart?t=30", nil
 	default:
-		return fmt.Errorf("action %q is not implemented by local agent", j.Kind)
+		return "", fmt.Errorf("action %q is not implemented by local agent", kind)
 	}
 }
 
