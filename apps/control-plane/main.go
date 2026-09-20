@@ -985,7 +985,7 @@ func (s *server) instances(w http.ResponseWriter, r *http.Request) {
 	if cursorError(w, err) {
 		return
 	}
-	query := `SELECT i.id,i.node_id,i.map_name,i.cluster_id,i.desired_state,COALESCE(st.observed_state,'unknown'),COALESCE(st.health,'unknown'),st.last_error,COALESCE(st.observed_at,i.updated_at) FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id`
+	query := `SELECT i.id,i.node_id,i.map_name,i.cluster_id,i.desired_state,COALESCE(st.observed_state,'unknown'),COALESCE(st.health,'unknown'),st.last_error,COALESCE(st.observed_at,i.updated_at),COALESCE((SELECT jsonb_object_agg(pa.purpose,pa.port) FROM port_allocations pa WHERE pa.instance_id=i.id AND pa.node_id=i.node_id),'{}'::jsonb) FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id`
 	args := []any{limit + 1}
 	if len(parts) == 1 {
 		query += ` WHERE i.id > $2`
@@ -1003,11 +1003,17 @@ func (s *server) instances(w http.ResponseWriter, r *http.Request) {
 		var id, node, mapName, cluster, desired, observed, health string
 		var lastError *string
 		var observedAt time.Time
-		if err := rows.Scan(&id, &node, &mapName, &cluster, &desired, &observed, &health, &lastError, &observedAt); err != nil {
+		var ports []byte
+		if err := rows.Scan(&id, &node, &mapName, &cluster, &desired, &observed, &health, &lastError, &observedAt, &ports); err != nil {
 			writeError(w, 500, "internal_error", "could not read instances")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt})
+		var decodedPorts map[string]int
+		if err := json.Unmarshal(ports, &decodedPorts); err != nil {
+			writeError(w, 500, "internal_error", "could not decode instance ports")
+			return
+		}
+		items = append(items, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt, "ports": decodedPorts})
 	}
 	next := ""
 	if len(items) > limit {
@@ -1022,7 +1028,8 @@ func (s *server) instance(w http.ResponseWriter, r *http.Request) {
 	var node, mapName, cluster, desired, observed, health string
 	var lastError *string
 	var observedAt time.Time
-	err := s.db.QueryRow(r.Context(), `SELECT i.node_id,i.map_name,i.cluster_id,i.desired_state,COALESCE(st.observed_state,'unknown'),COALESCE(st.health,'unknown'),st.last_error,COALESCE(st.observed_at,i.updated_at) FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id WHERE i.id=$1`, id).Scan(&node, &mapName, &cluster, &desired, &observed, &health, &lastError, &observedAt)
+	var rawPorts []byte
+	err := s.db.QueryRow(r.Context(), `SELECT i.node_id,i.map_name,i.cluster_id,i.desired_state,COALESCE(st.observed_state,'unknown'),COALESCE(st.health,'unknown'),st.last_error,COALESCE(st.observed_at,i.updated_at),COALESCE((SELECT jsonb_object_agg(pa.purpose,pa.port) FROM port_allocations pa WHERE pa.instance_id=i.id AND pa.node_id=i.node_id),'{}'::jsonb) FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id WHERE i.id=$1`, id).Scan(&node, &mapName, &cluster, &desired, &observed, &health, &lastError, &observedAt, &rawPorts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 404, "not_found", "instance not found")
 		return
@@ -1031,7 +1038,12 @@ func (s *server) instance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not read instance")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt})
+	var ports map[string]int
+	if err := json.Unmarshal(rawPorts, &ports); err != nil {
+		writeError(w, 500, "internal_error", "could not decode instance ports")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt, "ports": ports})
 }
 
 func (s *server) createInstance(w http.ResponseWriter, r *http.Request) {
