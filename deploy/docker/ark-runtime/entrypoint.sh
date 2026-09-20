@@ -140,6 +140,7 @@ export SteamGameId="${SteamGameId:-2430930}"
 export STEAM_COMPAT_APP_ID="${STEAM_COMPAT_APP_ID:-2430930}"
 export WINEPREFIX="${WINEPREFIX:-$proton_data_root/pfx}"
 mkdir -p "$STEAM_COMPAT_DATA_PATH" "$XDG_RUNTIME_DIR"
+mkdir -p "$WINEPREFIX/dosdevices"
 chmod 700 "$XDG_RUNTIME_DIR"
 
 if [[ "${ARK_XVFB:-true}" == "true" ]]; then
@@ -156,7 +157,11 @@ fi
 
 if [[ "${ARK_INSTALL_VCREDIST:-true}" == "true" && ! -f "$WINEPREFIX/drive_c/windows/system32/vcruntime140.dll" ]]; then
   echo "Installing Microsoft Visual C++ runtime into the persistent Proton prefix" | tee -a "$server_log"
-  /opt/ark/proton/proton runinprefix /opt/ark/vc_redist.x64.exe /quiet /norestart 2>&1 | redact_stream | tee -a "$server_log"
+  if [[ ! -f "$WINEPREFIX/drive_c/windows/system32/kernel32.dll" ]]; then
+    /opt/ark/proton/proton run /opt/ark/vc_redist.x64.exe /quiet /norestart 2>&1 | redact_stream | tee -a "$server_log"
+  else
+    /opt/ark/proton/proton runinprefix /opt/ark/vc_redist.x64.exe /quiet /norestart 2>&1 | redact_stream | tee -a "$server_log"
+  fi
 fi
 
 pve_query='ServerPVE=true'
