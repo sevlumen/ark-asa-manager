@@ -53,10 +53,18 @@ Assert-NotContains $entrypoint '?RCONEnabled=True?RCONPort=' 'Entrypoint must no
 
 $image = 'ark-asa-runtime:local'
 if (docker image inspect $image 2>$null) {
-    $probe = 'source /usr/local/bin/secrets.sh; secret_values=(fake-runtime-secret); printf "password=fake-runtime-secret\n" | redact_stream'
+    $probe = @'
+source /usr/local/bin/secrets.sh
+secret_values=(fake-runtime-secret fake-server-password fake-steam-password)
+cat <<'LOG' | redact_stream
+SteamCMD login fake-steam-password app_update 2430930
+ARK launch args ServerAdminPassword=fake-runtime-secret ServerPassword=fake-server-password
+RCON connection password=fake-runtime-secret
+LOG
+'@
     $redacted = docker run --rm --entrypoint bash $image -c $probe
-    if ($LASTEXITCODE -ne 0 -or $redacted -match 'fake-runtime-secret' -or $redacted -notmatch '\[REDACTED\]') {
-        $failures.Add('Runtime image redaction probe must hide fake secret values.')
+    if ($LASTEXITCODE -ne 0 -or $redacted -match 'fake-runtime-secret|fake-server-password|fake-steam-password' -or ($redacted -split "`r?`n").Count -lt 3) {
+        $failures.Add('Runtime image redaction probe must hide fake secrets across all representative runtime log lines.')
     }
 }
 
