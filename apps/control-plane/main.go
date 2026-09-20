@@ -357,6 +357,11 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "forbidden", "unknown agent identity")
 		return
 	}
+	input, err := decodeHeartbeatPayload(r.Body)
+	if err != nil {
+		writeError(w, 400, "invalid_request", "invalid heartbeat payload")
+		return
+	}
 	result, err := s.db.Exec(r.Context(), `UPDATE nodes SET status='online',last_heartbeat=now(),updated_at=now() WHERE id=$1`, nodeID)
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not update heartbeat")
@@ -364,18 +369,6 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	if result.RowsAffected() != 1 {
 		writeError(w, 404, "not_found", "node not found")
-		return
-	}
-	var input struct {
-		Instances []struct {
-			InstanceID    string `json:"instance_id"`
-			ContainerID   string `json:"container_id"`
-			ObservedState string `json:"observed_state"`
-			Health        string `json:"health"`
-		} `json:"instances"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
-		writeError(w, 400, "invalid_request", "invalid heartbeat payload")
 		return
 	}
 	observed := make(map[string]struct {
@@ -434,6 +427,28 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]any{"node_id": nodeID, "status": "online", "observed_at": time.Now().UTC()})
+}
+
+func decodeHeartbeatPayload(reader io.Reader) (struct {
+	Instances []struct {
+		InstanceID    string `json:"instance_id"`
+		ContainerID   string `json:"container_id"`
+		ObservedState string `json:"observed_state"`
+		Health        string `json:"health"`
+	} `json:"instances"`
+}, error) {
+	var input struct {
+		Instances []struct {
+			InstanceID    string `json:"instance_id"`
+			ContainerID   string `json:"container_id"`
+			ObservedState string `json:"observed_state"`
+			Health        string `json:"health"`
+		} `json:"instances"`
+	}
+	if err := json.NewDecoder(reader).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+		return input, err
+	}
+	return input, nil
 }
 
 func decodeErrorBody(r *http.Request, dst any) error {

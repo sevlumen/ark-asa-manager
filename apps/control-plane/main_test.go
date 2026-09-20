@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -162,5 +163,15 @@ func TestBuildActionPayloadPreservesBackupID(t *testing.T) {
 	backup, err := buildActionPayload("backup", "")
 	if err != nil || backup["action"] != "backup" {
 		t.Fatalf("backup payload should not require backup_id: %#v, %v", backup, err)
+	}
+}
+
+func TestDecodeHeartbeatPayloadRejectsMalformedJSON(t *testing.T) {
+	if _, err := decodeHeartbeatPayload(strings.NewReader("{not-json")); err == nil {
+		t.Fatal("malformed heartbeat JSON should be rejected")
+	}
+	parsed, err := decodeHeartbeatPayload(strings.NewReader(`{"instances":[{"instance_id":"theisland","observed_state":"running"}]}`))
+	if err != nil || len(parsed.Instances) != 1 || parsed.Instances[0].InstanceID != "theisland" {
+		t.Fatalf("valid heartbeat JSON was not parsed: %#v, %v", parsed, err)
 	}
 }
