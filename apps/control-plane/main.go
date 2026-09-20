@@ -4,12 +4,15 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -80,6 +83,9 @@ func main() {
 	if err := s.reconcileLocalInstance(ctx); err != nil {
 		log.Fatal(err)
 	}
+	if err := s.startInternalListener(); err != nil {
+		log.Fatal(err)
+	}
 	r := chi.NewRouter()
 	r.Use(s.requestID)
 	r.Get("/healthz", s.health)
@@ -109,6 +115,43 @@ func main() {
 	if err := http.ListenAndServe(":"+port, r); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func (s *server) startInternalListener() error {
+	certFile, keyFile, caFile := os.Getenv("INTERNAL_TLS_CERT_FILE"), os.Getenv("INTERNAL_TLS_KEY_FILE"), os.Getenv("INTERNAL_TLS_CA_FILE")
+	if certFile == "" || keyFile == "" || caFile == "" {
+		log.Print("internal agent listener disabled: TLS files are not configured")
+		return nil
+	}
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return fmt.Errorf("load internal TLS certificate: %w", err)
+	}
+	caBytes, err := os.ReadFile(caFile)
+	if err != nil {
+		return fmt.Errorf("read internal TLS CA: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caBytes) {
+		return errors.New("parse internal TLS CA")
+	}
+	internal := chi.NewRouter()
+	internal.Post("/internal/agent/lease", s.agentLease)
+	internal.Post("/internal/agent/jobs/{id}/complete", s.agentComplete)
+	internal.Post("/internal/agent/jobs/{id}/fail", s.agentFail)
+	internal.Post("/internal/agent/heartbeat", s.agentHeartbeat)
+	listener, err := net.Listen("tcp", ":"+getenv("INTERNAL_PORT", "8443"))
+	if err != nil {
+		return err
+	}
+	tlsListener := tls.NewListener(listener, &tls.Config{Certificates: []tls.Certificate{cert}, ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS12})
+	go func() {
+		log.Printf("private agent listener listening on :%s", getenv("INTERNAL_PORT", "8443"))
+		if err := http.Serve(tlsListener, internal); err != nil {
+			log.Printf("private agent listener stopped: %v", err)
+		}
+	}()
+	return nil
 }
 
 func (s *server) bootstrapAdmin(ctx context.Context) error {
@@ -164,6 +207,112 @@ func (s *server) reconcileLocalInstance(ctx context.Context) error {
 		return fmt.Errorf("reconcile local instance status: %w", err)
 	}
 	return nil
+}
+
+func (s *server) agentIdentity(r *http.Request) (string, bool) {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		return "", false
+	}
+	nodeID := r.TLS.PeerCertificates[0].Subject.CommonName
+	var exists bool
+	if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes WHERE id=$1)`, nodeID).Scan(&exists); err != nil || !exists {
+		return "", false
+	}
+	return nodeID, true
+}
+
+func (s *server) agentLease(w http.ResponseWriter, r *http.Request) {
+	nodeID, ok := s.agentIdentity(r)
+	if !ok {
+		writeError(w, http.StatusForbidden, "forbidden", "unknown agent identity")
+		return
+	}
+	var id string
+	var instanceID, kind string
+	var payload []byte
+	var attempts int
+	var expires time.Time
+	err := s.db.QueryRow(r.Context(), `UPDATE jobs SET status='leased', lease_owner=$1, lease_expires_at=now()+interval '60 seconds', attempts=attempts+1, started_at=COALESCE(started_at,now()) WHERE id=(SELECT id FROM jobs WHERE (status='queued' OR (status IN ('leased','running') AND lease_expires_at < now())) AND attempts < max_attempts ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING id,instance_id,kind,payload,attempts,lease_expires_at`, nodeID).Scan(&id, &instanceID, &kind, &payload, &attempts, &expires)
+	if errors.Is(err, pgx.ErrNoRows) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not lease job")
+		return
+	}
+	var decoded any
+	_ = json.Unmarshal(payload, &decoded)
+	writeJSON(w, 200, map[string]any{"id": id, "instance_id": instanceID, "kind": kind, "payload": decoded, "attempts": attempts, "lease_expires_at": expires, "owner": nodeID})
+}
+
+func (s *server) agentComplete(w http.ResponseWriter, r *http.Request) {
+	nodeID, ok := s.agentIdentity(r)
+	if !ok {
+		writeError(w, 403, "forbidden", "unknown agent identity")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	result, err := s.db.Exec(r.Context(), `UPDATE jobs SET status='succeeded',lease_owner=NULL,lease_expires_at=NULL,finished_at=now(),last_error=NULL WHERE id=$1 AND lease_owner=$2`, id, nodeID)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not complete job")
+		return
+	}
+	if result.RowsAffected() != 1 {
+		writeError(w, 409, "conflict", "job lease is no longer owned by this agent")
+		return
+	}
+	s.appendEvent(r.Context(), "job.succeeded", "job", id, map[string]any{"owner": nodeID})
+	writeJSON(w, 200, map[string]string{"status": "succeeded", "id": id})
+}
+
+func (s *server) agentFail(w http.ResponseWriter, r *http.Request) {
+	nodeID, ok := s.agentIdentity(r)
+	if !ok {
+		writeError(w, 403, "forbidden", "unknown agent identity")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var input struct {
+		Error string `json:"error"`
+	}
+	_ = decodeErrorBody(r, &input)
+	result, err := s.db.Exec(r.Context(), `UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'queued' END,lease_owner=NULL,lease_expires_at=NULL,last_error=$3,finished_at=CASE WHEN attempts>=max_attempts THEN now() ELSE NULL END WHERE id=$1 AND lease_owner=$2`, id, nodeID, input.Error)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not fail job")
+		return
+	}
+	if result.RowsAffected() != 1 {
+		writeError(w, 409, "conflict", "job lease is no longer owned by this agent")
+		return
+	}
+	s.appendEvent(r.Context(), "job.failed", "job", id, map[string]any{"owner": nodeID, "error": input.Error})
+	writeJSON(w, 200, map[string]string{"status": "failed", "id": id})
+}
+
+func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
+	nodeID, ok := s.agentIdentity(r)
+	if !ok {
+		writeError(w, 403, "forbidden", "unknown agent identity")
+		return
+	}
+	result, err := s.db.Exec(r.Context(), `UPDATE nodes SET status='online',last_heartbeat=now(),updated_at=now() WHERE id=$1`, nodeID)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not update heartbeat")
+		return
+	}
+	if result.RowsAffected() != 1 {
+		writeError(w, 404, "not_found", "node not found")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"node_id": nodeID, "status": "online", "observed_at": time.Now().UTC()})
+}
+
+func decodeErrorBody(r *http.Request, dst any) error {
+	if r.Body == nil {
+		return nil
+	}
+	return json.NewDecoder(r.Body).Decode(dst)
 }
 func (s *server) requestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
