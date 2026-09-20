@@ -8,6 +8,7 @@ $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $suffix = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $ids = @("isolation-a-$suffix", "isolation-b-$suffix")
 $created = New-Object System.Collections.Generic.List[string]
+$volumeSuffixes = @('-game', '-save', '-config', '-logs', '-backups', '-cluster')
 
 function Invoke-Api {
     param(
@@ -47,6 +48,13 @@ function Get-Container([string]$name) {
         return ($raw -join "`n") | ConvertFrom-Json | Select-Object -First 1
     } catch {
         return $null
+    }
+}
+
+function Remove-ProbeVolumes([string]$id) {
+    foreach ($suffixName in $volumeSuffixes) {
+        $volume = "ark-asa-platform_${id}${suffixName}"
+        try { & docker volume rm $volume 2>$null | Out-Null } catch {}
     }
 }
 
@@ -115,6 +123,7 @@ try {
 finally {
     foreach ($id in $created) {
         try { $null = Invoke-Api DELETE "/api/v1/instances/$id" -Headers $writeHeaders } catch {}
+        Remove-ProbeVolumes $id
     }
     try { $null = Invoke-Api POST '/api/v1/auth/logout' -Headers $writeHeaders } catch {}
 }

@@ -7,6 +7,7 @@ $password = (Get-Content $passwordFile -Raw).Trim()
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $instanceID = 'delete-probe-' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $containerName = "ark-$instanceID"
+$volumeSuffixes = @('-game', '-save', '-config', '-logs', '-backups', '-cluster')
 
 function Invoke-Api {
     param(
@@ -32,6 +33,12 @@ function Invoke-Api {
 function Assert-Status([object]$Response, [int]$Expected, [string]$Message) {
     if ([int]$Response.StatusCode -ne $Expected) {
         throw "$Message (expected $Expected, got $($Response.StatusCode))"
+    }
+}
+
+function Remove-ProbeVolumes {
+    foreach ($suffixName in $volumeSuffixes) {
+        try { & docker volume rm "ark-asa-platform_${instanceID}${suffixName}" 2>$null | Out-Null } catch {}
     }
 }
 
@@ -79,5 +86,6 @@ finally {
     if ($created) {
         try { $null = Invoke-Api DELETE "/api/v1/instances/$instanceID" -Headers $writeHeaders } catch {}
     }
+    Remove-ProbeVolumes
     try { $null = Invoke-Api POST '/api/v1/auth/logout' -Headers $writeHeaders } catch {}
 }
