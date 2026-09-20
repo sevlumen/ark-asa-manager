@@ -39,10 +39,18 @@ function Invoke-SmokeRequest {
         $response = Invoke-WebRequest @parameters
         return [pscustomobject]@{ StatusCode = [int]$response.StatusCode; Body = $response.Content }
     } catch {
-        $response = $_.Exception.Response
+        $webError = $_
+        $response = $webError.Exception.Response
         if ($null -eq $response) { throw }
-        $reader = New-Object IO.StreamReader($response.GetResponseStream())
-        try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        if ($response -is [System.Net.Http.HttpResponseMessage]) {
+            try { $content = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() } catch { $content = $webError.ErrorDetails.Message }
+        } else {
+            try {
+                $reader = New-Object IO.StreamReader($response.GetResponseStream())
+                try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            } catch { $content = $webError.ErrorDetails.Message }
+        }
+        if ($null -eq $content) { $content = '' }
         return [pscustomobject]@{ StatusCode = [int]$response.StatusCode; Body = $content }
     }
 }
