@@ -3,17 +3,21 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -116,6 +120,7 @@ func main() {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/login", s.login)
 		r.Get("/auth/status", s.authStatus)
+		r.Post("/agent/enroll", s.agentEnroll)
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireSession)
 			r.Post("/auth/logout", s.logout)
@@ -186,6 +191,15 @@ func (s *server) startInternalListener() (*http.Server, error) {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caBytes) {
 		return nil, errors.New("parse internal TLS CA")
+	}
+	if enrollmentCAFile := os.Getenv("ENROLLMENT_CA_CERT_FILE"); enrollmentCAFile != "" {
+		enrollmentCA, err := os.ReadFile(enrollmentCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read enrollment TLS CA: %w", err)
+		}
+		if !pool.AppendCertsFromPEM(enrollmentCA) {
+			return nil, errors.New("parse enrollment TLS CA")
+		}
 	}
 	internal := chi.NewRouter()
 	internal.Post("/internal/agent/lease", s.agentLease)
@@ -821,13 +835,134 @@ func (s *server) createNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if _, err := s.db.Exec(r.Context(), `INSERT INTO nodes (id,name,endpoint) VALUES ($1,$2,$3)`, id, input.Name, input.Endpoint); err != nil {
+	enrollmentToken, err := randomID()
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not create enrollment token")
+		return
+	}
+	expiresAt := time.Now().UTC().Add(15 * time.Minute)
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not create node")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, err := tx.Exec(r.Context(), `INSERT INTO nodes (id,name,endpoint) VALUES ($1,$2,$3)`, id, input.Name, input.Endpoint); err != nil {
 		writeError(w, 409, "conflict", "node already exists")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `INSERT INTO node_enrollments (id,node_id,token_hash,expires_at) VALUES ($1,$2,$3,$4)`, enrollmentToken, id, hashToken(enrollmentToken), expiresAt); err != nil {
+		writeError(w, 500, "internal_error", "could not create node enrollment")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, 500, "internal_error", "could not create node")
 		return
 	}
 	p := currentPrincipal(r)
 	s.recordAudit(r.Context(), p.Username, "node.create", "node:"+id, map[string]any{"outcome": "allowed"})
-	writeJSON(w, 201, map[string]any{"id": id, "name": input.Name, "endpoint": input.Endpoint, "status": "unknown", "last_heartbeat": nil})
+	writeJSON(w, 201, map[string]any{"id": id, "name": input.Name, "endpoint": input.Endpoint, "status": "unknown", "last_heartbeat": nil, "enrollment_token": enrollmentToken, "enrollment_expires_at": expiresAt})
+}
+
+func (s *server) agentEnroll(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		NodeID string `json:"node_id"`
+		Token  string `json:"token"`
+		CSR    string `json:"csr"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	input.NodeID = strings.TrimSpace(input.NodeID)
+	input.Token = strings.TrimSpace(input.Token)
+	if input.NodeID == "" || input.Token == "" || input.CSR == "" {
+		writeError(w, 400, "invalid_request", "node_id, token, and csr are required")
+		return
+	}
+	requestBlock, _ := pem.Decode([]byte(input.CSR))
+	if requestBlock == nil || requestBlock.Type != "CERTIFICATE REQUEST" {
+		writeError(w, 400, "invalid_request", "csr must be PEM encoded")
+		return
+	}
+	csr, err := x509.ParseCertificateRequest(requestBlock.Bytes)
+	if err != nil || csr.Subject.CommonName != input.NodeID || csr.CheckSignature() != nil {
+		writeError(w, 400, "invalid_request", "csr identity or signature is invalid")
+		return
+	}
+	var enrolledNode string
+	err = s.db.QueryRow(r.Context(), `UPDATE node_enrollments SET consumed_at=now() WHERE token_hash=$1 AND node_id=$2 AND consumed_at IS NULL AND expires_at>now() RETURNING node_id`, hashToken(input.Token), input.NodeID).Scan(&enrolledNode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 401, "unauthorized", "invalid or expired enrollment token")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not consume enrollment token")
+		return
+	}
+	certFile := os.Getenv("ENROLLMENT_CA_CERT_FILE")
+	keyFile := os.Getenv("ENROLLMENT_CA_KEY_FILE")
+	if certFile == "" || keyFile == "" {
+		writeError(w, 503, "not_ready", "node enrollment signer is not configured")
+		return
+	}
+	caPEM, err := os.ReadFile(certFile)
+	if err != nil {
+		writeError(w, 503, "not_ready", "could not read enrollment CA")
+		return
+	}
+	caBlock, _ := pem.Decode(caPEM)
+	if caBlock == nil {
+		writeError(w, 503, "not_ready", "could not parse enrollment CA")
+		return
+	}
+	caCert, err := x509.ParseCertificate(caBlock.Bytes)
+	if err != nil {
+		writeError(w, 503, "not_ready", "could not parse enrollment CA certificate")
+		return
+	}
+	keyPEM, err := os.ReadFile(keyFile)
+	if err != nil {
+		writeError(w, 503, "not_ready", "could not read enrollment CA key")
+		return
+	}
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil {
+		writeError(w, 503, "not_ready", "could not parse enrollment CA key")
+		return
+	}
+	caKey, err := x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
+	if err != nil {
+		parsed, parseErr := x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
+		if parseErr != nil {
+			writeError(w, 503, "not_ready", "could not parse enrollment CA private key")
+			return
+		}
+		var ok bool
+		caKey, ok = parsed.(*rsa.PrivateKey)
+		if !ok {
+			writeError(w, 503, "not_ready", "enrollment CA key is not RSA")
+			return
+		}
+	}
+	serialBytes := make([]byte, 16)
+	if _, err := rand.Read(serialBytes); err != nil {
+		writeError(w, 500, "internal_error", "could not create certificate serial")
+		return
+	}
+	now := time.Now().UTC()
+	expiresAt := now.Add(825 * 24 * time.Hour)
+	certificateDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{SerialNumber: new(big.Int).SetBytes(serialBytes), Subject: pkix.Name{CommonName: input.NodeID}, NotBefore: now.Add(-5 * time.Minute), NotAfter: expiresAt, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}, caCert, csr.PublicKey, caKey)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not issue node certificate")
+		return
+	}
+	fingerprint := fmt.Sprintf("%x", sha256.Sum256(certificateDER))
+	if _, err := s.db.Exec(r.Context(), `INSERT INTO node_certificates (node_id,fingerprint,expires_at) VALUES ($1,$2,$3) ON CONFLICT (node_id) DO UPDATE SET fingerprint=EXCLUDED.fingerprint,expires_at=EXCLUDED.expires_at,created_at=now()`, input.NodeID, fingerprint, expiresAt); err != nil {
+		writeError(w, 500, "internal_error", "could not record node certificate")
+		return
+	}
+	s.recordAudit(r.Context(), "agent:"+input.NodeID, "node.enroll", "node:"+input.NodeID, map[string]any{"outcome": "allowed", "fingerprint": fingerprint})
+	writeJSON(w, 200, map[string]any{"node_id": input.NodeID, "certificate": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificateDER})), "ca_certificate": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCert.Raw})), "fingerprint": fingerprint, "expires_at": expiresAt})
 }
 
 func validNodeEndpoint(value string) bool {

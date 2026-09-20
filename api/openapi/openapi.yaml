@@ -67,6 +67,24 @@ paths:
                 properties:
                   authenticated: { type: boolean }
                   user: { $ref: '#/components/schemas/Principal' }
+  /api/v1/agent/enroll:
+    post:
+      tags: [nodes]
+      operationId: enrollAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AgentEnrollmentRequest' }
+      responses:
+        '200':
+          description: One-use enrollment token exchanged for a client certificate.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AgentEnrollmentResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/NotReady' }
   /api/v1/auth/csrf:
     get:
       tags: [auth]
@@ -447,6 +465,11 @@ components:
       required: true
       schema: { type: string, minLength: 1, maxLength: 128 }
   responses:
+    BadRequest:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
     Unauthorized:
       description: Authentication required.
       content:
@@ -459,6 +482,11 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
       description: Resource not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotReady:
+      description: Enrollment signer is unavailable.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -511,6 +539,24 @@ components:
         endpoint: { type: string, format: uri }
         status: { type: string, enum: [unknown, online, offline, degraded] }
         last_heartbeat: { type: string, format: date-time, nullable: true }
+        enrollment_token: { type: string, nullable: true, writeOnly: true }
+        enrollment_expires_at: { type: string, format: date-time, nullable: true }
+    AgentEnrollmentRequest:
+      type: object
+      required: [node_id, token, csr]
+      properties:
+        node_id: { type: string }
+        token: { type: string, format: password }
+        csr: { type: string, description: PEM encoded certificate signing request. }
+    AgentEnrollmentResponse:
+      type: object
+      required: [node_id, certificate, ca_certificate, fingerprint, expires_at]
+      properties:
+        node_id: { type: string }
+        certificate: { type: string }
+        ca_certificate: { type: string }
+        fingerprint: { type: string, pattern: '^[0-9a-f]{64}$' }
+        expires_at: { type: string, format: date-time }
     CreateNodeRequest:
       type: object
       required: [name, endpoint]

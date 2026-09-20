@@ -5,11 +5,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +33,7 @@ type config struct {
 	publicURL, internalURL, nodeID, dockerHost, certFile, keyFile, caFile, runtimeImage, volumePrefix string
 	memoryLimit                                                                                       int64
 	nanoCPUs                                                                                          int64
+	enrollmentCAFile, enrollmentTokenFile                                                             string
 }
 type agent struct {
 	cfg     config
@@ -85,7 +90,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	cfg := config{publicURL: getenv("CONTROL_PLANE_URL", "http://control-plane:8080"), internalURL: getenv("CONTROL_PLANE_INTERNAL_URL", "https://control-plane:8443"), nodeID: getenv("NODE_ID", "local-node"), dockerHost: dockerBaseURL(getenv("DOCKER_HOST", "tcp://socket-proxy:2375")), certFile: getenv("AGENT_TLS_CERT_FILE", "/run/ark-tls/agent.pem"), keyFile: getenv("AGENT_TLS_KEY_FILE", "/run/ark-tls/agent-key.pem"), caFile: getenv("AGENT_TLS_CA_FILE", "/run/ark-tls/ca.pem"), runtimeImage: getenv("ARK_RUNTIME_IMAGE", "ark-asa-runtime:local"), volumePrefix: getenv("ARK_VOLUME_PREFIX", "ark-asa-platform"), memoryLimit: memoryLimit, nanoCPUs: nanoCPUs}
+	cfg := config{publicURL: getenv("CONTROL_PLANE_URL", "http://control-plane:8080"), internalURL: getenv("CONTROL_PLANE_INTERNAL_URL", "https://control-plane:8443"), nodeID: getenv("NODE_ID", "local-node"), dockerHost: dockerBaseURL(getenv("DOCKER_HOST", "tcp://socket-proxy:2375")), certFile: getenv("AGENT_TLS_CERT_FILE", "/run/ark-tls/agent.pem"), keyFile: getenv("AGENT_TLS_KEY_FILE", "/run/ark-tls/agent-key.pem"), caFile: getenv("AGENT_TLS_CA_FILE", "/run/ark-tls/ca.pem"), runtimeImage: getenv("ARK_RUNTIME_IMAGE", "ark-asa-runtime:local"), volumePrefix: getenv("ARK_VOLUME_PREFIX", "ark-asa-platform"), memoryLimit: memoryLimit, nanoCPUs: nanoCPUs, enrollmentCAFile: getenv("AGENT_ENROLLMENT_CA_FILE", ""), enrollmentTokenFile: getenv("NODE_ENROLLMENT_TOKEN_FILE", "")}
+	if err := ensureAgentEnrollment(cfg); err != nil {
+		log.Fatal(err)
+	}
 	control, err := mtlsClient(cfg)
 	if err != nil {
 		log.Fatal(err)
@@ -698,6 +706,94 @@ func responseError(res *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 	return fmt.Errorf("status %s: %s", res.Status, string(body))
 }
+
+func ensureAgentEnrollment(cfg config) error {
+	_, certErr := os.Stat(cfg.certFile)
+	_, keyErr := os.Stat(cfg.keyFile)
+	if certErr == nil && keyErr == nil {
+		return nil
+	}
+	if cfg.enrollmentTokenFile == "" {
+		return nil
+	}
+	tokenBytes, err := os.ReadFile(cfg.enrollmentTokenFile)
+	if err != nil {
+		return fmt.Errorf("read node enrollment token: %w", err)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	if token == "" {
+		return errors.New("node enrollment token is empty")
+	}
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("generate node enrollment key: %w", err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: cfg.nodeID}}, privateKey)
+	if err != nil {
+		return fmt.Errorf("create node enrollment CSR: %w", err)
+	}
+	body, err := json.Marshal(map[string]string{"node_id": cfg.nodeID, "token": token, "csr": string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(cfg.publicURL, "/")+"/api/v1/agent/enroll", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return fmt.Errorf("enroll node certificate: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return responseError(res)
+	}
+	var response struct {
+		Certificate string `json:"certificate"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&response); err != nil {
+		return fmt.Errorf("decode enrollment response: %w", err)
+	}
+	if response.Certificate == "" {
+		return errors.New("enrollment response did not contain a certificate")
+	}
+	if err := os.MkdirAll(path.Dir(cfg.certFile), 0700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(path.Dir(cfg.keyFile), 0700); err != nil {
+		return err
+	}
+	if err := writePrivateFile(cfg.keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}), 0600); err != nil {
+		return fmt.Errorf("save enrolled key: %w", err)
+	}
+	if err := writePrivateFile(cfg.certFile, []byte(response.Certificate), 0644); err != nil {
+		return fmt.Errorf("save enrolled certificate: %w", err)
+	}
+	return nil
+}
+
+func writePrivateFile(name string, content []byte, mode os.FileMode) error {
+	temporary, err := os.CreateTemp(path.Dir(name), ".enrollment-*")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if err := temporary.Chmod(mode); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(content); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryName, name)
+}
+
 func mtlsClient(cfg config) (*http.Client, error) {
 	cert, err := tls.LoadX509KeyPair(cfg.certFile, cfg.keyFile)
 	if err != nil {
@@ -710,6 +806,15 @@ func mtlsClient(cfg config) (*http.Client, error) {
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(raw) {
 		return nil, errors.New("parse agent mTLS CA")
+	}
+	if cfg.enrollmentCAFile != "" {
+		enrollmentCA, err := os.ReadFile(cfg.enrollmentCAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read agent enrollment CA: %w", err)
+		}
+		if !pool.AppendCertsFromPEM(enrollmentCA) {
+			return nil, errors.New("parse agent enrollment CA")
+		}
 	}
 	return &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{Certificates: []tls.Certificate{cert}, RootCAs: pool, MinVersion: tls.VersionTLS12}}}, nil
 }

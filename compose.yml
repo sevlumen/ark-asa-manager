@@ -40,6 +40,7 @@ services:
       NODE_ID: ${NODE_ID:-local-node}
     volumes:
       - control-plane-tls:/tls
+      - control-plane-enrollment-ca:/enrollment
     restart: "no"
 
   control-plane:
@@ -60,11 +61,14 @@ services:
       INTERNAL_TLS_CERT_FILE: /run/ark-tls/server.pem
       INTERNAL_TLS_KEY_FILE: /run/ark-tls/server-key.pem
       INTERNAL_TLS_CA_FILE: /run/ark-tls/ca.pem
+      ENROLLMENT_CA_CERT_FILE: /run/ark-enrollment-ca/ca.pem
+      ENROLLMENT_CA_KEY_FILE: /run/ark-enrollment-ca/ca-key.pem
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_BOOTSTRAP_PASSWORD_FILE: /run/secrets/admin_bootstrap_password
     volumes:
       - ${ADMIN_BOOTSTRAP_PASSWORD_FILE:-./.secrets/admin_bootstrap_password}:/run/secrets/admin_bootstrap_password:ro
       - control-plane-tls:/run/ark-tls:ro
+      - control-plane-enrollment-ca:/run/ark-enrollment-ca:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -112,6 +116,7 @@ services:
       AGENT_TLS_CERT_FILE: /run/ark-tls/agent.pem
       AGENT_TLS_KEY_FILE: /run/ark-tls/agent-key.pem
       AGENT_TLS_CA_FILE: /run/ark-tls/ca.pem
+      AGENT_ENROLLMENT_CA_FILE: /run/ark-tls/enrollment-ca.pem
       ARK_RUNTIME_IMAGE: ${ARK_IMAGE:-ark-asa-runtime:local}
       ARK_VOLUME_PREFIX: ${COMPOSE_PROJECT_NAME:-ark-asa-platform}
       ARK_MEMORY_LIMIT: ${ARK_MEMORY_LIMIT:-12g}
@@ -262,6 +267,7 @@ services:
 volumes:
   postgres-data:
   control-plane-tls:
+  control-plane-enrollment-ca:
   ark-game:
   ark-save:
   ark-config:

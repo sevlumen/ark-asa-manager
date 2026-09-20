@@ -38,6 +38,16 @@ The host must provide `/var/run/docker.sock`. The agent receives only the
 restricted, allow-listed Docker API exposed by `socket-proxy`; it is not given
 an unrestricted Docker socket.
 
+## Agent enrollment
+
+An administrator can register a node from the **Nodes** page. The API returns a
+one-use enrollment token valid for 15 minutes; copy it into a Docker secret or
+other protected file and configure a new agent with `NODE_ID`,
+`NODE_ENROLLMENT_TOKEN_FILE`, and writable `AGENT_TLS_CERT_FILE`/
+`AGENT_TLS_KEY_FILE` paths. The agent generates its own private key and CSR,
+then exchanges the token for a client certificate. The enrollment CA key stays
+in its dedicated control-plane volume and is never mounted into the agent.
+
 For RCON, create a host-side secret file and run with the RCON override:
 
 ```bash

@@ -114,6 +114,9 @@ Assert-Contains $bootstrapPs 'BitConverter' 'PowerShell bootstrap must support W
 Assert-Contains $bootstrapPs 'Set-Acl' 'PowerShell bootstrap must protect the local .env file.'
 Assert-Contains $compose 'PUBLIC_ORIGIN:-http://localhost:3000' 'Control-plane origin must match the web console default.'
 Assert-Contains $envExample 'PUBLIC_ORIGIN=http://localhost:3000' 'Environment example must document the web console origin.'
+Assert-Contains $compose 'control-plane-enrollment-ca' 'Enrollment CA must use a dedicated Docker volume.'
+Assert-Contains $compose 'ENROLLMENT_CA_CERT_FILE' 'Control-plane enrollment signer certificate path is missing.'
+Assert-Contains $compose 'AGENT_ENROLLMENT_CA_FILE' 'Agent enrollment CA trust path is missing.'
 
 if ($failures.Count -gt 0) {
     throw ($failures -join [Environment]::NewLine)
