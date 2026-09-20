@@ -43,6 +43,14 @@ The host must provide `/var/run/docker.sock`. The agent receives only the
 restricted, allow-listed Docker API exposed by `socket-proxy`; it is not given
 an unrestricted Docker socket.
 
+To verify two managed instances share a node without sharing ports, labels, or
+persistence boundaries, run the disposable acceptance probe (it removes its
+own instances and containers when complete):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests/acceptance/instance_isolation.ps1
+```
+
 ## Agent enrollment
 
 An administrator can register a node from the **Nodes** page. The API returns a
