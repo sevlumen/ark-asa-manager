@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ark}
       POSTGRES_USER: ${POSTGRES_USER:-ark}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set; run scripts/bootstrap.sh first}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -22,8 +22,8 @@ services:
       dockerfile: deploy/docker/migrate/Dockerfile
     image: ark-asa-migrate:local
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable
-    command: ["-dir", "/migrations", "postgres", "postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable", "up"]
+      DATABASE_URL: postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable
+    command: ["-dir", "/migrations", "postgres", "postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable", "up"]
     volumes:
       - ./db/migrations:/migrations:ro
     depends_on:
@@ -48,7 +48,7 @@ services:
       dockerfile: apps/control-plane/Dockerfile
     image: ${CONTROL_PLANE_IMAGE:-ark-asa-control-plane:local}
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable
       PORT: 8080
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
       NODE_ID: ${NODE_ID:-local-node}

@@ -8,6 +8,8 @@ $healthcheck = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\healthche
 $compose = Get-Content (Join-Path $root 'compose.yml') -Raw
 $webPackage = Get-Content (Join-Path $root 'apps\web\package.json') -Raw
 $webDockerfile = Get-Content (Join-Path $root 'apps\web\Dockerfile') -Raw
+$envExample = Get-Content (Join-Path $root '.env.example') -Raw
+$bootstrap = Get-Content (Join-Path $root 'scripts\bootstrap.sh') -Raw
 $failures = [System.Collections.Generic.List[string]]::new()
 
 function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
@@ -102,6 +104,10 @@ Assert-Contains $webDockerfile 'bun install --frozen-lockfile' 'Web image must u
 Assert-NotContains $webDockerfile '|| bun install' 'Web image must not fall back to a non-frozen install.'
 Assert-Contains $webDockerfile 'oven/bun:1.2-alpine@sha256:' 'Web build and runtime images must be digest pinned.'
 Assert-NotContains $compose 'tecnativa/docker-socket-proxy:latest' 'Socket proxy image must not float on latest.'
+Assert-NotContains $compose 'POSTGRES_PASSWORD:-change-me' 'Compose must not provide the unsafe PostgreSQL password fallback.'
+Assert-NotContains $envExample 'POSTGRES_PASSWORD=change-me' 'Environment example must not contain the unsafe PostgreSQL password.'
+Assert-Contains $compose 'POSTGRES_PASSWORD:?' 'Compose must require an explicit PostgreSQL password.'
+Assert-Contains $bootstrap 'openssl rand -hex 24' 'Bootstrap must generate a PostgreSQL password when creating .env.'
 
 if ($failures.Count -gt 0) {
     throw ($failures -join [Environment]::NewLine)
