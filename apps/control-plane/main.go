@@ -719,7 +719,7 @@ func (s *server) instances(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "internal_error", "could not read instances")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "node_id": node, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt})
+		items = append(items, map[string]any{"id": id, "node_id": node, "map": mapName, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt})
 	}
 	next := ""
 	if len(items) > limit {
