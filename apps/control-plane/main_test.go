@@ -81,3 +81,17 @@ func TestRoleCapabilities(t *testing.T) {
 		t.Fatal("admin is missing node management capability")
 	}
 }
+
+func TestJobFailureStatus(t *testing.T) {
+	for _, test := range []struct {
+		status, want string
+	}{
+		{status: "queued", want: "job.requeued"},
+		{status: "failed", want: "job.failed"},
+	} {
+		got := jobFailureEvent(test.status)
+		if got != test.want {
+			t.Errorf("status=%q: got %q, want %q", test.status, got, test.want)
+		}
+	}
+}

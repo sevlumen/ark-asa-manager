@@ -302,17 +302,26 @@ func (s *server) agentFail(w http.ResponseWriter, r *http.Request) {
 		Error string `json:"error"`
 	}
 	_ = decodeErrorBody(r, &input)
-	result, err := s.db.Exec(r.Context(), `UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'queued' END,lease_owner=NULL,lease_expires_at=NULL,last_error=$3,finished_at=CASE WHEN attempts>=max_attempts THEN now() ELSE NULL END WHERE id=$1 AND lease_owner=$2`, id, nodeID, input.Error)
+	var status string
+	err := s.db.QueryRow(r.Context(), `UPDATE jobs SET status=CASE WHEN attempts>=max_attempts THEN 'failed' ELSE 'queued' END,lease_owner=NULL,lease_expires_at=NULL,last_error=$3,finished_at=CASE WHEN attempts>=max_attempts THEN now() ELSE NULL END WHERE id=$1 AND lease_owner=$2 RETURNING status`, id, nodeID, input.Error).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 409, "conflict", "job lease is no longer owned by this agent")
+		return
+	}
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not fail job")
 		return
 	}
-	if result.RowsAffected() != 1 {
-		writeError(w, 409, "conflict", "job lease is no longer owned by this agent")
-		return
+	eventType := jobFailureEvent(status)
+	s.appendEvent(r.Context(), eventType, "job", id, map[string]any{"owner": nodeID, "error": input.Error, "status": status})
+	writeJSON(w, 200, map[string]string{"status": status, "id": id})
+}
+
+func jobFailureEvent(status string) string {
+	if status == "queued" {
+		return "job.requeued"
 	}
-	s.appendEvent(r.Context(), "job.failed", "job", id, map[string]any{"owner": nodeID, "error": input.Error})
-	writeJSON(w, 200, map[string]string{"status": "failed", "id": id})
+	return "job.failed"
 }
 
 func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
