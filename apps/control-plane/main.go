@@ -18,9 +18,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -68,7 +70,8 @@ const (
 )
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	healthcheck := flag.Bool("healthcheck", false, "check the local HTTP server and exit")
 	flag.Parse()
 	port := getenv("PORT", "8080")
@@ -102,7 +105,8 @@ func main() {
 	if err := s.reconcileLocalInstance(ctx); err != nil {
 		log.Fatal(err)
 	}
-	if err := s.startInternalListener(); err != nil {
+	internalServer, err := s.startInternalListener()
+	if err != nil {
 		log.Fatal(err)
 	}
 	r := chi.NewRouter()
@@ -138,29 +142,49 @@ func main() {
 			})
 		})
 	})
-	log.Printf("control-plane listening on :%s", port)
-	if err := http.ListenAndServe(":"+port, r); err != nil {
+	publicServer := &http.Server{Addr: ":" + port, Handler: r}
+	serverErrors := make(chan error, 2)
+	go func() {
+		log.Printf("control-plane listening on :%s", port)
+		if err := publicServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErrors <- err
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		log.Print("control-plane shutting down")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := publicServer.Shutdown(shutdownCtx); err != nil {
+			log.Printf("control-plane shutdown: %v", err)
+		}
+		if internalServer != nil {
+			if err := internalServer.Shutdown(shutdownCtx); err != nil {
+				log.Printf("private agent listener shutdown: %v", err)
+			}
+		}
+	case err := <-serverErrors:
 		log.Fatal(err)
 	}
 }
 
-func (s *server) startInternalListener() error {
+func (s *server) startInternalListener() (*http.Server, error) {
 	certFile, keyFile, caFile := os.Getenv("INTERNAL_TLS_CERT_FILE"), os.Getenv("INTERNAL_TLS_KEY_FILE"), os.Getenv("INTERNAL_TLS_CA_FILE")
 	if certFile == "" || keyFile == "" || caFile == "" {
 		log.Print("internal agent listener disabled: TLS files are not configured")
-		return nil
+		return nil, nil
 	}
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return fmt.Errorf("load internal TLS certificate: %w", err)
+		return nil, fmt.Errorf("load internal TLS certificate: %w", err)
 	}
 	caBytes, err := os.ReadFile(caFile)
 	if err != nil {
-		return fmt.Errorf("read internal TLS CA: %w", err)
+		return nil, fmt.Errorf("read internal TLS CA: %w", err)
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(caBytes) {
-		return errors.New("parse internal TLS CA")
+		return nil, errors.New("parse internal TLS CA")
 	}
 	internal := chi.NewRouter()
 	internal.Post("/internal/agent/lease", s.agentLease)
@@ -169,16 +193,17 @@ func (s *server) startInternalListener() error {
 	internal.Post("/internal/agent/heartbeat", s.agentHeartbeat)
 	listener, err := net.Listen("tcp", ":"+getenv("INTERNAL_PORT", "8443"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tlsListener := tls.NewListener(listener, &tls.Config{Certificates: []tls.Certificate{cert}, ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS12})
+	internalServer := &http.Server{Handler: internal}
 	go func() {
 		log.Printf("private agent listener listening on :%s", getenv("INTERNAL_PORT", "8443"))
-		if err := http.Serve(tlsListener, internal); err != nil {
+		if err := internalServer.Serve(tlsListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("private agent listener stopped: %v", err)
 		}
 	}()
-	return nil
+	return internalServer, nil
 }
 
 func (s *server) bootstrapAdmin(ctx context.Context) error {
