@@ -108,6 +108,8 @@ Assert-NotContains $compose 'POSTGRES_PASSWORD:-change-me' 'Compose must not pro
 Assert-NotContains $envExample 'POSTGRES_PASSWORD=change-me' 'Environment example must not contain the unsafe PostgreSQL password.'
 Assert-Contains $compose 'POSTGRES_PASSWORD:?' 'Compose must require an explicit PostgreSQL password.'
 Assert-Contains $bootstrap 'openssl rand -hex 24' 'Bootstrap must generate a PostgreSQL password when creating .env.'
+Assert-Contains $compose 'PUBLIC_ORIGIN:-http://localhost:3000' 'Control-plane origin must match the web console default.'
+Assert-Contains $envExample 'PUBLIC_ORIGIN=http://localhost:3000' 'Environment example must document the web console origin.'
 
 if ($failures.Count -gt 0) {
     throw ($failures -join [Environment]::NewLine)

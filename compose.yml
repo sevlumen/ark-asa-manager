@@ -50,7 +50,7 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-ark}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ark}?sslmode=disable
       PORT: 8080
-      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:8080}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
       NODE_ID: ${NODE_ID:-local-node}
       BOOTSTRAP_LOCAL_INSTANCE: ${BOOTSTRAP_LOCAL_INSTANCE:-true}
       ARK_INSTANCE_ID: ${ARK_INSTANCE_ID:-theisland}
