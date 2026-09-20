@@ -22,6 +22,7 @@ if (-not (Test-Path $secrets)) {
 } else {
     $secretReader = Get-Content $secrets -Raw
     Assert-Contains $secretReader 'read_secret_file' 'Runtime secret reader must expose read_secret_file.'
+    Assert-Contains $secretReader 'write_ark_passwords_config' 'Runtime secret helper must write passwords to GameUserSettings.ini.'
     Assert-Contains $secretReader 'file is missing' 'Missing secret files must fail with a non-secret diagnostic.'
     Assert-NotContains $secretReader 'printf.*secret' 'Secret reader must not print secret values.'
 }
@@ -45,7 +46,10 @@ Assert-NotContains $runtimeEnv 'ARK_ADMIN_PASSWORD=change-admin-password' 'Runti
 
 Assert-Contains $entrypoint 'ARK_ADMIN_PASSWORD_FILE' 'Entrypoint must read the admin password from a file.'
 Assert-Contains $entrypoint 'ARK_SERVER_PASSWORD_FILE' 'Entrypoint must read the server password from a file.'
-Assert-Contains $entrypoint 'ServerAdminPassword=' 'Entrypoint must pass ServerAdminPassword to ASA.'
+Assert-Contains $entrypoint 'config/WindowsServer/GameUserSettings.ini' 'Entrypoint must configure passwords through the Proton ASA WindowsServer GameUserSettings.ini.'
+Assert-NotContains $entrypoint 'server_query+="?ServerAdminPassword=' 'Entrypoint must not expose the admin password in process argv.'
+Assert-NotContains $entrypoint 'server_query+="?ServerPassword=' 'Entrypoint must not expose the server password in process argv.'
+Assert-Contains $secretReader 'ServerAdminPassword=' 'Secret helper must write ServerAdminPassword to the runtime config.'
 Assert-Contains $entrypoint 'RCONEnabled=' 'Entrypoint must derive RCONEnabled from explicit configuration.'
 Assert-Contains $entrypoint 'redact_stream' 'Runtime output must redact loaded secret values.'
 Assert-NotContains $entrypoint 'ServerPassword=${ARK_SERVER_PASSWORD:-}' 'Entrypoint must not use a plaintext server password fallback.'
@@ -53,6 +57,24 @@ Assert-NotContains $entrypoint '?RCONEnabled=True?RCONPort=' 'Entrypoint must no
 
 $image = 'ark-asa-runtime:local'
 if (docker image inspect $image 2>$null) {
+    $configProbe = @'
+source /usr/local/bin/secrets.sh
+config=$(mktemp)
+echo '[ServerSettings]' > "$config"
+echo 'ServerName=SmokeTest' >> "$config"
+echo 'ServerAdminPassword=old-admin-password' >> "$config"
+write_ark_passwords_config "$config" "fake-admin-password" "fake-server-password"
+grep -Fqx 'ServerAdminPassword=fake-admin-password' "$config"
+grep -Fqx 'ServerPassword=fake-server-password' "$config"
+! grep -Fqx 'ServerAdminPassword=old-admin-password' "$config"
+test "$(stat -c %a "$config")" = 600
+'@
+    $configProbe = $configProbe -replace "`r", ''
+    docker run --rm --entrypoint bash $image -c $configProbe
+    if ($LASTEXITCODE -ne 0) {
+        $failures.Add('Runtime config probe must write file-backed passwords with restrictive permissions.')
+    }
+
     $probe = @'
 source /usr/local/bin/secrets.sh
 secret_values=(fake-runtime-secret fake-server-password fake-steam-password)
@@ -62,6 +84,7 @@ ARK launch args ServerAdminPassword=fake-runtime-secret ServerPassword=fake-serv
 RCON connection password=fake-runtime-secret
 LOG
 '@
+    $probe = $probe -replace "`r", ''
     $redacted = docker run --rm --entrypoint bash $image -c $probe
     if ($LASTEXITCODE -ne 0 -or $redacted -match 'fake-runtime-secret|fake-server-password|fake-steam-password' -or ($redacted -split "`r?`n").Count -lt 3) {
         $failures.Add('Runtime image redaction probe must hide fake secrets across all representative runtime log lines.')

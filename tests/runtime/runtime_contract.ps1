@@ -12,6 +12,10 @@ function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
     if (-not $Text.Contains($Needle)) { $failures.Add($Message) }
 }
 
+function Assert-NotContains([string]$Text, [string]$Needle, [string]$Message) {
+    if ($Text.Contains($Needle)) { $failures.Add($Message) }
+}
+
 Assert-Contains $dockerfile 'ARG PROTON_SHA256=' 'Proton checksum build argument is missing.'
 Assert-Contains $dockerfile 'ARG STEAMCMD_SHA256=' 'SteamCMD checksum build argument is missing.'
 Assert-Contains $dockerfile 'ARG PROTON_VERSION=GE-Proton10-34' 'Runtime must use the tested GE-Proton version.'
@@ -52,6 +56,10 @@ Assert-Contains $entrypoint 'Xvfb' 'The entrypoint must start the virtual displa
 Assert-Contains $entrypoint 'WINEDLLOVERRIDES' 'The ASA Proton launch must configure the Windows DLL overrides.'
 Assert-Contains $entrypoint '-game' 'The ASA server launch must include the game mode flag.'
 Assert-Contains $entrypoint 'ARK_INSTALL_VCREDIST' 'VC++ redistributable installation must be configurable.'
+Assert-Contains $entrypoint 'write_ark_passwords_config' 'ARK passwords must be written to the runtime config instead of process argv.'
+Assert-Contains $entrypoint 'config/WindowsServer/GameUserSettings.ini' 'ARK password config must target the Proton ASA WindowsServer config path.'
+Assert-NotContains $entrypoint 'server_query+="?ServerAdminPassword=' 'Admin password must not be passed through the server process argv.'
+Assert-NotContains $entrypoint 'server_query+="?ServerPassword=' 'Server password must not be passed through the server process argv.'
 Assert-Contains $entrypoint 'runinprefix' 'The VC++ redistributable must be installed into the persistent Proton prefix.'
 Assert-Contains $entrypoint 'vcruntime140.dll' 'VC++ installation must be idempotent against the persistent prefix.'
 Assert-Contains $entrypoint 'sdk64' 'Proton must have a native Steam SDK search directory.'

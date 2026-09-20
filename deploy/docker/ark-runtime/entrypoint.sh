@@ -121,6 +121,14 @@ for item in Config Logs Saved; do
   ln -s "$target" "$game_root/ShooterGame/Saved/$item"
 done
 
+if [[ -n "$admin_password" || -n "$server_password" ]]; then
+  mkdir -p "$data_root/config/WindowsServer"
+  write_ark_passwords_config \
+    "$data_root/config/WindowsServer/GameUserSettings.ini" \
+    "$admin_password" \
+    "$server_password"
+fi
+
 proton_data_root="${STEAM_COMPAT_DATA_PATH:-$data_root/config/proton}"
 export STEAM_COMPAT_DATA_PATH="$proton_data_root"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-/opt/ark}"
@@ -164,12 +172,6 @@ server_name="${server_name// /_}"
 server_query="${ARK_MAP:-TheIsland_WP}?listen?SessionName=${server_name}?MaxPlayers=${ARK_MAX_PLAYERS:-10}?${pve_query}?RCONEnabled=${rcon_enabled}"
 if [[ "$rcon_enabled" == true ]]; then
   server_query+="?RCONPort=${ARK_RCON_PORT:-32330}"
-fi
-if [[ -n "$admin_password" ]]; then
-  server_query+="?ServerAdminPassword=${admin_password}"
-fi
-if [[ -n "$server_password" ]]; then
-  server_query+="?ServerPassword=${server_password}"
 fi
 
 server_args=(
