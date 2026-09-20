@@ -25,7 +25,11 @@ import (
 	"time"
 )
 
-type config struct{ publicURL, internalURL, nodeID, dockerHost, certFile, keyFile, caFile, runtimeImage, volumePrefix string }
+type config struct {
+	publicURL, internalURL, nodeID, dockerHost, certFile, keyFile, caFile, runtimeImage, volumePrefix string
+	memoryLimit                                                                                       int64
+	nanoCPUs                                                                                          int64
+}
 type agent struct {
 	cfg     config
 	control *http.Client
@@ -73,7 +77,15 @@ type backupResult struct {
 }
 
 func main() {
-	cfg := config{publicURL: getenv("CONTROL_PLANE_URL", "http://control-plane:8080"), internalURL: getenv("CONTROL_PLANE_INTERNAL_URL", "https://control-plane:8443"), nodeID: getenv("NODE_ID", "local-node"), dockerHost: dockerBaseURL(getenv("DOCKER_HOST", "tcp://socket-proxy:2375")), certFile: getenv("AGENT_TLS_CERT_FILE", "/run/ark-tls/agent.pem"), keyFile: getenv("AGENT_TLS_KEY_FILE", "/run/ark-tls/agent-key.pem"), caFile: getenv("AGENT_TLS_CA_FILE", "/run/ark-tls/ca.pem"), runtimeImage: getenv("ARK_RUNTIME_IMAGE", "ark-asa-runtime:local"), volumePrefix: getenv("ARK_VOLUME_PREFIX", "ark-asa-platform")}
+	memoryLimit, err := parseMemoryLimit(getenv("ARK_MEMORY_LIMIT", "12g"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	nanoCPUs, err := parseCPULimit(getenv("ARK_CPUS", "4"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	cfg := config{publicURL: getenv("CONTROL_PLANE_URL", "http://control-plane:8080"), internalURL: getenv("CONTROL_PLANE_INTERNAL_URL", "https://control-plane:8443"), nodeID: getenv("NODE_ID", "local-node"), dockerHost: dockerBaseURL(getenv("DOCKER_HOST", "tcp://socket-proxy:2375")), certFile: getenv("AGENT_TLS_CERT_FILE", "/run/ark-tls/agent.pem"), keyFile: getenv("AGENT_TLS_KEY_FILE", "/run/ark-tls/agent-key.pem"), caFile: getenv("AGENT_TLS_CA_FILE", "/run/ark-tls/ca.pem"), runtimeImage: getenv("ARK_RUNTIME_IMAGE", "ark-asa-runtime:local"), volumePrefix: getenv("ARK_VOLUME_PREFIX", "ark-asa-platform"), memoryLimit: memoryLimit, nanoCPUs: nanoCPUs}
 	control, err := mtlsClient(cfg)
 	if err != nil {
 		log.Fatal(err)
@@ -230,6 +242,9 @@ type dockerHostConfig struct {
 	Binds         []string                       `json:"Binds"`
 	PortBindings  map[string][]map[string]string `json:"PortBindings"`
 	RestartPolicy map[string]any                 `json:"RestartPolicy"`
+	Memory        int64                          `json:"Memory,omitempty"`
+	NanoCPUs      int64                          `json:"NanoCpus,omitempty"`
+	LogConfig     map[string]any                 `json:"LogConfig,omitempty"`
 }
 
 type dockerCreateRequest struct {
@@ -289,6 +304,9 @@ func (a *agent) createManagedContainer(desired desiredInstance) error {
 			},
 			PortBindings:  bindings,
 			RestartPolicy: map[string]any{"Name": "unless-stopped"},
+			Memory:        a.cfg.memoryLimit,
+			NanoCPUs:      a.cfg.nanoCPUs,
+			LogConfig:     map[string]any{"Type": "json-file", "Config": map[string]string{"max-size": "50m", "max-file": "5"}},
 		},
 	}
 	body, err := json.Marshal(request)
@@ -711,4 +729,36 @@ func dockerBaseURL(value string) string {
 		return "http://" + strings.TrimPrefix(value, "tcp://")
 	}
 	return value
+}
+
+func parseMemoryLimit(value string) (int64, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return 0, errors.New("ARK_MEMORY_LIMIT must be a positive size")
+	}
+	multiplier := int64(1)
+	if suffix := value[len(value)-1]; suffix == 'k' || suffix == 'm' || suffix == 'g' {
+		switch suffix {
+		case 'k':
+			multiplier = 1024
+		case 'm':
+			multiplier = 1024 * 1024
+		case 'g':
+			multiplier = 1024 * 1024 * 1024
+		}
+		value = strings.TrimSpace(value[:len(value)-1])
+	}
+	amount, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || amount <= 0 || amount > (1<<62)/multiplier {
+		return 0, fmt.Errorf("ARK_MEMORY_LIMIT must be a positive size, got %q", value)
+	}
+	return amount * multiplier, nil
+}
+
+func parseCPULimit(value string) (int64, error) {
+	amount, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+	if err != nil || amount <= 0 || amount > 1024 {
+		return 0, fmt.Errorf("ARK_CPUS must be a positive CPU limit, got %q", value)
+	}
+	return int64(amount * 1_000_000_000), nil
 }

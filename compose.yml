@@ -114,6 +114,8 @@ services:
       AGENT_TLS_CA_FILE: /run/ark-tls/ca.pem
       ARK_RUNTIME_IMAGE: ${ARK_IMAGE:-ark-asa-runtime:local}
       ARK_VOLUME_PREFIX: ${COMPOSE_PROJECT_NAME:-ark-asa-platform}
+      ARK_MEMORY_LIMIT: ${ARK_MEMORY_LIMIT:-12g}
+      ARK_CPUS: ${ARK_CPUS:-4}
     depends_on:
       control-plane:
         condition: service_started

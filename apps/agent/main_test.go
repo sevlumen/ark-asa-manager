@@ -62,6 +62,28 @@ func TestDesiredReconcileAction(t *testing.T) {
 	}
 }
 
+func TestResourceLimitParsers(t *testing.T) {
+	if got, _ := parseMemoryLimit("12g"); got != 12*1024*1024*1024 {
+		t.Fatalf("memory limit = %d", got)
+	}
+	if got, _ := parseMemoryLimit("512m"); got != 512*1024*1024 {
+		t.Fatalf("memory limit = %d", got)
+	}
+	if got, _ := parseCPULimit("2.5"); got != 2_500_000_000 {
+		t.Fatalf("cpu limit = %d", got)
+	}
+	for _, value := range []string{"", "0", "-1g", "abc", "1tb"} {
+		if _, err := parseMemoryLimit(value); err == nil {
+			t.Fatalf("memory limit %q should be rejected", value)
+		}
+	}
+	for _, value := range []string{"", "0", "-1", "abc", "1025"} {
+		if _, err := parseCPULimit(value); err == nil {
+			t.Fatalf("cpu limit %q should be rejected", value)
+		}
+	}
+}
+
 func TestValidBackupNameRejectsTraversal(t *testing.T) {
 	for _, name := range []string{"", "../save.tar.gz", "/tmp/save.tar.gz", "save.zip"} {
 		if validBackupName(name) {
