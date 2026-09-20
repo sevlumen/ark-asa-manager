@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -521,13 +522,25 @@ func clearLoginFailures(ip, username string) {
 }
 
 func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(r.Context(), `SELECT id,name,endpoint,status,last_heartbeat,created_at FROM nodes ORDER BY name`)
+	limit := parseLimit(r.URL.Query().Get("limit"))
+	parts, err := decodeCursor(r.URL.Query().Get("cursor"), 2)
+	if cursorError(w, err) {
+		return
+	}
+	query := `SELECT id,name,endpoint,status,last_heartbeat,created_at FROM nodes`
+	args := []any{limit + 1}
+	if len(parts) == 2 {
+		query += ` WHERE (name,id) > ($2,$3)`
+		args = append(args, parts[0], parts[1])
+	}
+	query += ` ORDER BY name,id LIMIT $1`
+	rows, err := s.db.Query(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not list nodes")
 		return
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id, name, endpoint, status string
 		var heartbeat, created *time.Time
@@ -537,7 +550,12 @@ func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": status, "last_heartbeat": heartbeat, "created_at": created})
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "count": len(items)})
+	next := ""
+	if len(items) > limit {
+		next = encodeCursor(items[limit-1]["name"].(string), items[limit-1]["id"].(string))
+		items = items[:limit]
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "count": len(items), "next_cursor": next})
 }
 
 func (s *server) node(w http.ResponseWriter, r *http.Request) {
@@ -674,13 +692,25 @@ func (s *server) authStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) instances(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(r.Context(), `SELECT i.id,i.node_id,i.map_name,i.cluster_id,i.desired_state,COALESCE(st.observed_state,'unknown'),COALESCE(st.health,'unknown'),st.last_error,COALESCE(st.observed_at,i.updated_at) FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id ORDER BY i.id`)
+	limit := parseLimit(r.URL.Query().Get("limit"))
+	parts, err := decodeCursor(r.URL.Query().Get("cursor"), 1)
+	if cursorError(w, err) {
+		return
+	}
+	query := `SELECT i.id,i.node_id,i.map_name,i.cluster_id,i.desired_state,COALESCE(st.observed_state,'unknown'),COALESCE(st.health,'unknown'),st.last_error,COALESCE(st.observed_at,i.updated_at) FROM instances i LEFT JOIN instance_status st ON st.instance_id=i.id`
+	args := []any{limit + 1}
+	if len(parts) == 1 {
+		query += ` WHERE i.id > $2`
+		args = append(args, parts[0])
+	}
+	query += ` ORDER BY i.id LIMIT $1`
+	rows, err := s.db.Query(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not list instances")
 		return
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id, node, mapName, cluster, desired, observed, health string
 		var lastError *string
@@ -691,7 +721,12 @@ func (s *server) instances(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, map[string]any{"id": id, "node_id": node, "map_name": mapName, "cluster_id": cluster, "desired_state": desired, "observed_state": observed, "health": health, "last_error": lastError, "observed_at": observedAt})
 	}
-	writeJSON(w, 200, map[string]any{"items": items, "count": len(items)})
+	next := ""
+	if len(items) > limit {
+		next = encodeCursor(items[limit-1]["id"].(string))
+		items = items[:limit]
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "count": len(items), "next_cursor": next})
 }
 
 func (s *server) instance(w http.ResponseWriter, r *http.Request) {
@@ -819,13 +854,29 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) jobs(w http.ResponseWriter, r *http.Request) {
 	limit := parseLimit(r.URL.Query().Get("limit"))
-	rows, err := s.db.Query(r.Context(), `SELECT id,instance_id,kind,status,attempts,last_error,created_by,created_at,started_at,finished_at FROM jobs ORDER BY created_at DESC LIMIT $1`, limit)
+	parts, err := decodeCursor(r.URL.Query().Get("cursor"), 2)
+	if cursorError(w, err) {
+		return
+	}
+	query := `SELECT id,instance_id,kind,status,attempts,last_error,created_by,created_at,started_at,finished_at FROM jobs`
+	args := []any{limit + 1}
+	if len(parts) == 2 {
+		created, parseErr := time.Parse(time.RFC3339Nano, parts[0])
+		if parseErr != nil {
+			cursorError(w, parseErr)
+			return
+		}
+		query += ` WHERE (created_at,id) < ($2,$3)`
+		args = append(args, created, parts[1])
+	}
+	query += ` ORDER BY created_at DESC,id DESC LIMIT $1`
+	rows, err := s.db.Query(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not list jobs")
 		return
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id, kind, status string
 		var instanceID, lastError, createdBy *string
@@ -838,7 +889,13 @@ func (s *server) jobs(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, map[string]any{"id": id, "instance_id": instanceID, "kind": kind, "status": status, "attempts": attempts, "last_error": lastError, "created_by": createdBy, "created_at": createdAt, "started_at": startedAt, "finished_at": finishedAt})
 	}
-	writeJSON(w, 200, map[string]any{"items": items})
+	next := ""
+	if len(items) > limit {
+		created := items[limit-1]["created_at"].(time.Time)
+		next = encodeCursor(created.Format(time.RFC3339Nano), items[limit-1]["id"].(string))
+		items = items[:limit]
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
 }
 func (s *server) job(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
@@ -859,13 +916,29 @@ func (s *server) job(w http.ResponseWriter, r *http.Request) {
 }
 func (s *server) audit(w http.ResponseWriter, r *http.Request) {
 	limit := parseLimit(r.URL.Query().Get("limit"))
-	rows, err := s.db.Query(r.Context(), `SELECT id,actor,action,resource,metadata,created_at FROM audit_log ORDER BY id DESC LIMIT $1`, limit)
+	parts, err := decodeCursor(r.URL.Query().Get("cursor"), 1)
+	if cursorError(w, err) {
+		return
+	}
+	query := `SELECT id,actor,action,resource,metadata,created_at FROM audit_log`
+	args := []any{limit + 1}
+	if len(parts) == 1 {
+		var cursorID int64
+		if _, scanErr := fmt.Sscan(parts[0], &cursorID); scanErr != nil {
+			cursorError(w, scanErr)
+			return
+		}
+		query += ` WHERE id < $2`
+		args = append(args, cursorID)
+	}
+	query += ` ORDER BY id DESC LIMIT $1`
+	rows, err := s.db.Query(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not list audit records")
 		return
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id int64
 		var actor, action, resource string
@@ -879,16 +952,33 @@ func (s *server) audit(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(metadata, &decoded)
 		items = append(items, map[string]any{"id": id, "actor": actor, "action": action, "resource": resource, "metadata": decoded, "created_at": at})
 	}
-	writeJSON(w, 200, map[string]any{"items": items})
+	next := ""
+	if len(items) > limit {
+		next = encodeCursor(fmt.Sprint(items[limit-1]["id"]))
+		items = items[:limit]
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
 }
 func (s *server) users(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.db.Query(r.Context(), `SELECT id,username,role,disabled_at,created_at FROM users ORDER BY username`)
+	limit := parseLimit(r.URL.Query().Get("limit"))
+	parts, err := decodeCursor(r.URL.Query().Get("cursor"), 2)
+	if cursorError(w, err) {
+		return
+	}
+	query := `SELECT id,username,role,disabled_at,created_at FROM users`
+	args := []any{limit + 1}
+	if len(parts) == 2 {
+		query += ` WHERE (username,id) > ($2,$3)`
+		args = append(args, parts[0], parts[1])
+	}
+	query += ` ORDER BY username,id LIMIT $1`
+	rows, err := s.db.Query(r.Context(), query, args...)
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not list users")
 		return
 	}
 	defer rows.Close()
-	items := make([]map[string]any, 0)
+	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id, username, role string
 		var disabled *time.Time
@@ -899,7 +989,12 @@ func (s *server) users(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, map[string]any{"id": id, "username": username, "role": role, "disabled_at": disabled, "created_at": created})
 	}
-	writeJSON(w, 200, map[string]any{"items": items})
+	next := ""
+	if len(items) > limit {
+		next = encodeCursor(items[limit-1]["username"].(string), items[limit-1]["id"].(string))
+		items = items[:limit]
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "next_cursor": next})
 }
 func (s *server) createUser(w http.ResponseWriter, r *http.Request) {
 	var input struct{ Username, Password, Role string }
@@ -1093,6 +1188,33 @@ func parseLimit(value string) int {
 		n = 50
 	}
 	return n
+}
+
+func encodeCursor(parts ...string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join(parts, "\x00")))
+}
+
+func decodeCursor(value string, expected int) ([]string, error) {
+	if value == "" {
+		return nil, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return nil, errors.New("invalid cursor")
+	}
+	parts := strings.Split(string(raw), "\x00")
+	if len(parts) != expected {
+		return nil, errors.New("invalid cursor")
+	}
+	return parts, nil
+}
+
+func cursorError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	writeError(w, 400, "invalid_cursor", "cursor is invalid or expired")
+	return true
 }
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {

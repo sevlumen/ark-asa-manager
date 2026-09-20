@@ -101,6 +101,13 @@ paths:
       tags: [nodes]
       operationId: listNodes
       security: [{ sessionCookie: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
       responses:
         '200':
           description: Registered nodes.
@@ -113,6 +120,7 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/Node' }
+                  next_cursor: { type: string, nullable: true }
         '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       tags: [nodes]
@@ -149,6 +157,13 @@ paths:
       tags: [instances]
       operationId: listInstances
       security: [{ sessionCookie: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
       responses:
         '200':
           description: ARK instances.
@@ -162,6 +177,7 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/Instance' }
                   count: { type: integer, format: int32, minimum: 0 }
+                  next_cursor: { type: string, nullable: true }
     post:
       tags: [instances]
       operationId: createInstance
@@ -257,6 +273,9 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
       responses:
         '200':
           description: Recent durable jobs.
@@ -269,12 +288,20 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/Job' }
+                  next_cursor: { type: string, nullable: true }
         '401': { $ref: '#/components/responses/Unauthorized' }
   /api/v1/audit:
     get:
       tags: [audit]
       operationId: listAudit
       security: [{ sessionCookie: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
       responses:
         '200':
           description: Audit records.
@@ -287,11 +314,19 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/AuditRecord' }
+                  next_cursor: { type: string, nullable: true }
   /api/v1/users:
     get:
       tags: [auth]
       operationId: listUsers
       security: [{ sessionCookie: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
       responses:
         '200':
           description: Administrators and operators.
@@ -304,6 +339,7 @@ paths:
                   items:
                     type: array
                     items: { $ref: '#/components/schemas/User' }
+                  next_cursor: { type: string, nullable: true }
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [auth]
