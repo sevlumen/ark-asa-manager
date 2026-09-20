@@ -160,6 +160,7 @@ services:
 
   ark:
     profiles: ["ark"]
+    stop_grace_period: 45s
     build:
       context: .
       dockerfile: deploy/docker/ark-runtime/Dockerfile
@@ -187,6 +188,7 @@ services:
       ARK_CROSSPLAY: ${ARK_CROSSPLAY:-true}
       ARK_BATTLEYE: ${ARK_BATTLEYE:-true}
       ARK_DISABLE_GAME_ANALYTICS: ${ARK_DISABLE_GAME_ANALYTICS:-true}
+      ARK_GRACEFUL_SHUTDOWN_SECONDS: ${ARK_GRACEFUL_SHUTDOWN_SECONDS:-30}
       ARK_UPDATE_ON_START: ${ARK_UPDATE_ON_START:-true}
       STEAM_USER: ${STEAM_USER:-anonymous}
       STEAM_PASSWORD: ${STEAM_PASSWORD:-}

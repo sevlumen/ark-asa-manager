@@ -11,6 +11,12 @@ engine_log="$data_root/log/ShooterGame.log"
 ready_marker="$data_root/log/ready.marker"
 server_pid=""
 xvfb_pid=""
+shutdown_seconds="${ARK_GRACEFUL_SHUTDOWN_SECONDS:-30}"
+
+if [[ ! "$shutdown_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo 'ARK_GRACEFUL_SHUTDOWN_SECONDS must be a positive integer.' >&2
+  exit 1
+fi
 
 if [[ -n "${ARK_ADMIN_PASSWORD:-}" || -n "${ARK_SERVER_PASSWORD:-}" ]]; then
   echo 'Plaintext ARK passwords are not accepted; configure *_PASSWORD_FILE instead.' >&2
@@ -215,7 +221,19 @@ server_pid=$!
 
 cleanup() {
   if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
-    kill "$server_pid" 2>/dev/null || true
+    echo "Requesting graceful ARK shutdown (timeout ${shutdown_seconds}s)" | tee -a "$server_log"
+    kill -TERM "$server_pid" 2>/dev/null || true
+    for ((shutdown_wait=0; shutdown_wait<shutdown_seconds; shutdown_wait++)); do
+      if ! kill -0 "$server_pid" 2>/dev/null; then
+        server_pid=""
+        break
+      fi
+      sleep 1
+    done
+    if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
+      echo "ARK graceful shutdown timed out; forcing process termination" | tee -a "$server_log"
+      kill -KILL "$server_pid" 2>/dev/null || true
+    fi
   fi
   if [[ -n "$xvfb_pid" ]] && kill -0 "$xvfb_pid" 2>/dev/null; then
     kill "$xvfb_pid" 2>/dev/null || true
