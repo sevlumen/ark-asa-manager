@@ -282,6 +282,7 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not enqueue job")
 		return
 	}
+	s.appendEvent(r.Context(), "job.queued", "job", jobID, map[string]any{"instance_id": id, "kind": action})
 	s.recordAudit(r.Context(), p.Username, "instance.action", "instance:"+id, map[string]any{"action": action, "outcome": "allowed", "job_id": jobID})
 	writeJSON(w, 202, map[string]any{"id": jobID, "status": "queued", "instance_id": id, "kind": action})
 }
@@ -461,21 +462,51 @@ func currentPrincipal(r *http.Request) principal {
 	return p
 }
 func (s *server) websocket(w http.ResponseWriter, r *http.Request) {
+	cursor, _ := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
-	_ = conn.WriteJSON(map[string]string{"type": "ready"})
+	if err := conn.WriteJSON(map[string]any{"type": "ready", "cursor": cursor}); err != nil {
+		return
+	}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
 	for {
-		messageType, message, err := conn.ReadMessage()
-		if err != nil {
+		rows, queryErr := s.db.Query(r.Context(), `SELECT id,event_type,resource_type,resource_id,payload,created_at FROM event_cursor WHERE id > $1 ORDER BY id LIMIT 100`, cursor)
+		if queryErr != nil {
 			return
 		}
-		if err := conn.WriteMessage(messageType, message); err != nil {
+		for rows.Next() {
+			var id int64
+			var eventType, resourceType, resourceID string
+			var payload []byte
+			var createdAt time.Time
+			if err := rows.Scan(&id, &eventType, &resourceType, &resourceID, &payload, &createdAt); err != nil {
+				rows.Close()
+				return
+			}
+			var decoded any
+			_ = json.Unmarshal(payload, &decoded)
+			if err := conn.WriteJSON(map[string]any{"type": "event", "cursor": id, "event_type": eventType, "resource_type": resourceType, "resource_id": resourceID, "payload": decoded, "created_at": createdAt}); err != nil {
+				rows.Close()
+				return
+			}
+			cursor = id
+		}
+		rows.Close()
+		select {
+		case <-r.Context().Done():
 			return
+		case <-ticker.C:
 		}
 	}
+}
+
+func (s *server) appendEvent(ctx context.Context, eventType, resourceType, resourceID string, payload map[string]any) {
+	body, _ := json.Marshal(payload)
+	_, _ = s.db.Exec(ctx, `INSERT INTO event_cursor (event_type,resource_type,resource_id,payload) VALUES ($1,$2,$3,$4)`, eventType, resourceType, resourceID, body)
 }
 func (s *server) recordAudit(ctx context.Context, actor, action, resource string, metadata map[string]any) {
 	body, _ := json.Marshal(metadata)
