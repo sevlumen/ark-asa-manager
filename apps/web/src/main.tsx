@@ -27,6 +27,7 @@ function App() {
   }, []);
   useEffect(() => { const onPopState = () => setPage(pageFromPath(window.location.pathname)); window.addEventListener("popstate", onPopState); return () => window.removeEventListener("popstate", onPopState); }, []);
   useEffect(() => { const onExpired = () => { window.history.replaceState({}, "", "/"); setPage("overview"); setUser(null); }; window.addEventListener("ark:session-expired", onExpired); return () => window.removeEventListener("ark:session-expired", onExpired); }, []);
+  useEffect(() => { if (!checking && !user && window.location.pathname !== "/") { window.history.replaceState({}, "", "/"); setPage("overview"); } }, [checking, user]);
   useEffect(() => { if (user) void api<any>("/system/health").then(r => setNodeHealth(r.agent || "unknown")).catch(() => setNodeHealth("unknown")); }, [user]);
   if (checking) return <div className="loading-screen"><div className="spinner" />Loading console</div>;
   if (!user) return <Login onLogin={setUser} />;
