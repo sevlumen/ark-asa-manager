@@ -186,6 +186,12 @@ func TestAgentLeaseQueryScopesJobsToOwningNode(t *testing.T) {
 	}
 }
 
+func TestAgentIdentityChecksEnrolledCertificateFingerprint(t *testing.T) {
+	if !strings.Contains(agentIdentityQuery, "node_certificates") || !strings.Contains(agentIdentityQuery, "fingerprint") || !strings.Contains(agentIdentityQuery, "expires_at") {
+		t.Fatal("agent identity must bind enrolled certificates to their recorded fingerprint")
+	}
+}
+
 func TestBuildActionPayloadPreservesBackupID(t *testing.T) {
 	payload, err := buildActionPayload("restore", "backup-123")
 	if err != nil || payload["action"] != "restore" || payload["backup_id"] != "backup-123" {

@@ -348,13 +348,22 @@ RETURNING port`, nodeID, instanceID, requirement.protocol, requirement.base, req
 	return 0, fmt.Errorf("no free %s port in range %d-%d", requirement.purpose, requirement.base, requirement.base+999)
 }
 
+const agentIdentityQuery = `SELECT EXISTS(SELECT 1 FROM nodes WHERE id=$1), (SELECT fingerprint FROM node_certificates WHERE node_id=$1), (SELECT expires_at FROM node_certificates WHERE node_id=$1)`
+
 func (s *server) agentIdentity(r *http.Request) (string, bool) {
 	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 		return "", false
 	}
-	nodeID := r.TLS.PeerCertificates[0].Subject.CommonName
+	certificate := r.TLS.PeerCertificates[0]
+	nodeID := certificate.Subject.CommonName
+	fingerprint := fmt.Sprintf("%x", sha256.Sum256(certificate.Raw))
 	var exists bool
-	if err := s.db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM nodes WHERE id=$1)`, nodeID).Scan(&exists); err != nil || !exists {
+	var registeredFingerprint *string
+	var expiresAt *time.Time
+	if err := s.db.QueryRow(r.Context(), agentIdentityQuery, nodeID).Scan(&exists, &registeredFingerprint, &expiresAt); err != nil || !exists {
+		return "", false
+	}
+	if registeredFingerprint != nil && (*registeredFingerprint != fingerprint || expiresAt == nil || !expiresAt.After(time.Now().UTC())) {
 		return "", false
 	}
 	return nodeID, true
