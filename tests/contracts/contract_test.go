@@ -43,6 +43,7 @@ func TestOpenAPIContractHasRequiredOperations(t *testing.T) {
 		"GET /api/v1/audit":                            "audit records",
 		"GET /api/v1/users":                            "list users",
 		"POST /api/v1/users":                           "create user",
+		"PATCH /api/v1/users/{id}":                    "update user",
 		"GET /api/v1/ws":                               "realtime events",
 	}
 	for route, description := range required {

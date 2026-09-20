@@ -134,6 +134,7 @@ func main() {
 				r.Post("/nodes", s.createNode)
 				r.Get("/users", s.users)
 				r.Post("/users", s.createUser)
+				r.Patch("/users/{id}", s.updateUser)
 			})
 		})
 	})
@@ -616,6 +617,10 @@ func validNodeEndpoint(value string) bool {
 	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
+func validRole(value string) bool {
+	return value == "admin" || value == "operator" || value == "viewer"
+}
+
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	var input struct{ Username, Password string }
 	if !decodeJSON(w, r, &input) {
@@ -1038,6 +1043,65 @@ func (s *server) createUser(w http.ResponseWriter, r *http.Request) {
 	p := currentPrincipal(r)
 	s.recordAudit(r.Context(), p.Username, "user.create", "user:"+input.Username, map[string]any{"role": input.Role, "outcome": "allowed"})
 	writeJSON(w, 201, map[string]any{"id": id, "username": input.Username, "role": input.Role})
+}
+
+func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var input struct {
+		Role     *string `json:"role"`
+		Disabled *bool   `json:"disabled"`
+	}
+	if !decodeJSON(w, r, &input) || (input.Role == nil && input.Disabled == nil) {
+		writeError(w, 400, "invalid_request", "role or disabled is required")
+		return
+	}
+	if input.Role != nil && !validRole(*input.Role) {
+		writeError(w, 400, "invalid_request", "invalid role")
+		return
+	}
+	var username, currentRole string
+	var disabledAt *time.Time
+	if err := s.db.QueryRow(r.Context(), `SELECT username,role,disabled_at FROM users WHERE id=$1`, id).Scan(&username, &currentRole, &disabledAt); errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 404, "not_found", "user not found")
+		return
+	} else if err != nil {
+		writeError(w, 500, "internal_error", "could not read user")
+		return
+	}
+	p := currentPrincipal(r)
+	if input.Disabled != nil && *input.Disabled && id == p.ID {
+		writeError(w, 409, "conflict", "cannot disable the current user")
+		return
+	}
+	removesActiveAdmin := input.Disabled != nil && *input.Disabled
+	if input.Role != nil && *input.Role != "admin" {
+		removesActiveAdmin = true
+	}
+	if removesActiveAdmin && currentRole == "admin" && disabledAt == nil {
+		var activeAdmins int
+		if err := s.db.QueryRow(r.Context(), `SELECT count(*) FROM users WHERE role='admin' AND disabled_at IS NULL`).Scan(&activeAdmins); err != nil {
+			writeError(w, 500, "internal_error", "could not count active administrators")
+			return
+		}
+		if activeAdmins <= 1 {
+			writeError(w, 409, "conflict", "cannot disable the last active administrator")
+			return
+		}
+	}
+	_, err := s.db.Exec(r.Context(), `UPDATE users SET role=COALESCE($2,role), disabled_at=CASE WHEN $3::boolean IS NULL THEN disabled_at WHEN $3 THEN now() ELSE NULL END, updated_at=now() WHERE id=$1`, id, input.Role, input.Disabled)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not update user")
+		return
+	}
+	s.recordAudit(r.Context(), p.Username, "user.update", "user:"+username, map[string]any{"role": input.Role, "disabled": input.Disabled, "outcome": "allowed"})
+	var role string
+	var updatedDisabled *time.Time
+	var created time.Time
+	if err := s.db.QueryRow(r.Context(), `SELECT role,disabled_at,created_at FROM users WHERE id=$1`, id).Scan(&role, &updatedDisabled, &created); err != nil {
+		writeError(w, 500, "internal_error", "could not read updated user")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"id": id, "username": username, "role": role, "disabled_at": updatedDisabled, "created_at": created})
 }
 
 func (s *server) requireSession(next http.Handler) http.Handler {

@@ -110,3 +110,12 @@ func TestValidNodeEndpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestUserUpdateGuards(t *testing.T) {
+	if !validRole("admin") || !validRole("operator") || !validRole("viewer") {
+		t.Fatal("expected supported roles to validate")
+	}
+	if validRole("owner") {
+		t.Fatal("unsupported role validated")
+	}
+}

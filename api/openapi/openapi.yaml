@@ -359,6 +359,33 @@ paths:
       responses:
         '201': { description: User created. }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/users/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/ResourceID' }
+    patch:
+      tags: [auth]
+      operationId: updateUser
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                role: { type: string, enum: [admin, operator, viewer] }
+                disabled: { type: boolean }
+      responses:
+        '200':
+          description: User updated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { description: Invalid user update request. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Unsafe account state transition. }
   /api/v1/ws:
     get:
       tags: [instances]
