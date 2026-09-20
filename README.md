@@ -21,10 +21,16 @@ Services are defined in [`compose.yml`](compose.yml):
 
 ```bash
 cp .env.example .env
+./scripts/bootstrap.sh
 docker compose up -d postgres control-plane socket-proxy agent web
 docker compose ps
 curl http://localhost:8080/healthz
 ```
+
+Bootstrap generates the required PostgreSQL password and local admin bootstrap
+secret, protects those files, and builds the control-plane, agent, web, and
+runtime images before the stack starts. On Windows PowerShell, run
+`powershell -ExecutionPolicy Bypass -File scripts/bootstrap.ps1` instead.
 
 Open the operations console at <http://localhost:3000>. After signing in, the
 admin can review the dashboard, servers, jobs, audit trail, nodes, and team

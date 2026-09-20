@@ -50,7 +50,7 @@ foreach ($protectedPath in @($envPath, $adminSecretPath)) {
     if ($LASTEXITCODE -ne 0) { throw "Could not protect $protectedPath with icacls." }
 }
 
-docker compose build control-plane agent web
+docker compose build control-plane agent web ark
 if ($LASTEXITCODE -ne 0) { throw 'Docker image build failed.' }
 docker compose up -d postgres control-plane socket-proxy agent web
 if ($LASTEXITCODE -ne 0) { throw 'Docker Compose startup failed.' }

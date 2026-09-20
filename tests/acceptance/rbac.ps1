@@ -10,6 +10,7 @@ $operatorName = "rbac-operator-$suffix"
 $viewerPassword = "Viewer-pass-$suffix-strong"
 $operatorPassword = "Operator-pass-$suffix-strong"
 $instanceID = "rbac-probe-$suffix"
+$containerName = "ark-$instanceID"
 $volumeSuffixes = @('-game', '-save', '-config', '-logs', '-backups', '-cluster')
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $createdUsers = @()
@@ -33,6 +34,10 @@ function Invoke-Api {
 
 function Assert-Status([object]$Response, [int]$Expected, [string]$Message) {
     if ([int]$Response.StatusCode -ne $Expected) { throw "$Message (expected $Expected, got $($Response.StatusCode))" }
+}
+
+function Remove-ProbeContainer {
+    try { & docker rm -f $containerName 2>$null | Out-Null } catch {}
 }
 
 function Remove-ProbeVolumes {
@@ -94,6 +99,7 @@ try {
 }
 finally {
     if ($instanceCreated) { docker exec ark-asa-platform-postgres-1 psql -U ark -d ark -c "delete from instances where id='$instanceID'" 2>$null | Out-Null }
+    Remove-ProbeContainer
     Remove-ProbeVolumes
     foreach ($username in $createdUsers) { docker exec ark-asa-platform-postgres-1 psql -U ark -d ark -c "delete from users where username='$username'" 2>$null | Out-Null }
     try { $null = Invoke-Api POST '/api/v1/auth/logout' -Headers $adminHeaders } catch {}

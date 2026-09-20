@@ -940,16 +940,6 @@ func (s *server) agentEnroll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "csr identity or signature is invalid")
 		return
 	}
-	var enrolledNode string
-	err = s.db.QueryRow(r.Context(), `UPDATE node_enrollments SET consumed_at=now() WHERE token_hash=$1 AND node_id=$2 AND consumed_at IS NULL AND expires_at>now() RETURNING node_id`, hashToken(input.Token), input.NodeID).Scan(&enrolledNode)
-	if errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, 401, "unauthorized", "invalid or expired enrollment token")
-		return
-	}
-	if err != nil {
-		writeError(w, 500, "internal_error", "could not consume enrollment token")
-		return
-	}
 	certFile := os.Getenv("ENROLLMENT_CA_CERT_FILE")
 	keyFile := os.Getenv("ENROLLMENT_CA_KEY_FILE")
 	if certFile == "" || keyFile == "" {
@@ -1005,6 +995,16 @@ func (s *server) agentEnroll(w http.ResponseWriter, r *http.Request) {
 	certificateDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{SerialNumber: new(big.Int).SetBytes(serialBytes), Subject: pkix.Name{CommonName: input.NodeID}, NotBefore: now.Add(-5 * time.Minute), NotAfter: expiresAt, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}, caCert, csr.PublicKey, caKey)
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not issue node certificate")
+		return
+	}
+	var enrolledNode string
+	err = s.db.QueryRow(r.Context(), `UPDATE node_enrollments SET consumed_at=now() WHERE token_hash=$1 AND node_id=$2 AND consumed_at IS NULL AND expires_at>now() RETURNING node_id`, hashToken(input.Token), input.NodeID).Scan(&enrolledNode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 401, "unauthorized", "invalid or expired enrollment token")
+		return
+	}
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not consume enrollment token")
 		return
 	}
 	fingerprint := fmt.Sprintf("%x", sha256.Sum256(certificateDER))

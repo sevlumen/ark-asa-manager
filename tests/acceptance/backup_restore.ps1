@@ -7,6 +7,7 @@ $password = (Get-Content $passwordFile -Raw).Trim()
 $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $suffix = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $instanceID = "backup-probe-$suffix"
+$containerName = "ark-$instanceID"
 $sentinel = "recovery-sentinel-$suffix.txt"
 $volumePrefix = 'ark-asa-platform'
 $volumeNames = @(
@@ -89,6 +90,7 @@ finally {
         try { $null = Invoke-Api DELETE "/api/v1/instances/$instanceID" -Headers $sessionHeaders } catch {}
         Start-Sleep -Seconds 12
     }
+    docker rm -f $containerName 2>$null | Out-Null
     foreach ($volume in $volumeNames) { docker volume rm $volume 2>$null | Out-Null }
     try { $null = Invoke-Api POST '/api/v1/auth/logout' -Headers $sessionHeaders } catch {}
 }

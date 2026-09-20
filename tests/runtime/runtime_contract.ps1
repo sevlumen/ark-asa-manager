@@ -12,6 +12,8 @@ $envExample = Get-Content (Join-Path $root '.env.example') -Raw
 $bootstrap = Get-Content (Join-Path $root 'scripts\bootstrap.sh') -Raw
 $bootstrapPs = Get-Content (Join-Path $root 'scripts\bootstrap.ps1') -Raw
 $tlsInit = Get-Content (Join-Path $root 'deploy\docker\tls-init\generate.sh') -Raw
+$readme = Get-Content (Join-Path $root 'README.md') -Raw
+$enrollmentHandler = Get-Content (Join-Path $root 'apps\control-plane\main.go') -Raw
 $failures = [System.Collections.Generic.List[string]]::new()
 
 function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
@@ -105,6 +107,7 @@ Assert-NotContains $webPackage '"latest"' 'Web dependencies must be pinned to ex
 Assert-Contains $webDockerfile 'bun install --frozen-lockfile' 'Web image must use a frozen dependency install.'
 Assert-NotContains $webDockerfile '|| bun install' 'Web image must not fall back to a non-frozen install.'
 Assert-Contains $webDockerfile 'oven/bun:1.2-alpine@sha256:' 'Web build and runtime images must be digest pinned.'
+Assert-Contains $webDockerfile 'COPY package.json bun.lock' 'Web image must copy bun.lock before frozen dependency installation.'
 Assert-NotContains $compose 'tecnativa/docker-socket-proxy:latest' 'Socket proxy image must not float on latest.'
 Assert-Contains $compose 'caddy:2-alpine@sha256:' 'Caddy image must be digest pinned.'
 Assert-Contains $compose 'nginx:1.27-alpine@sha256:' 'Nginx image must be digest pinned.'
@@ -120,6 +123,9 @@ Assert-Contains $envExample 'PUBLIC_ORIGIN=http://localhost:3000' 'Environment e
 Assert-Contains $envExample 'ADMIN_USERNAME=admin' 'Environment example must define the bootstrap administrator username.'
 Assert-Contains $bootstrap '.secrets/admin_bootstrap_password' 'Unix bootstrap must provision the local admin bootstrap secret path.'
 Assert-Contains $bootstrapPs '.secrets\admin_bootstrap_password' 'PowerShell bootstrap must provision the local admin bootstrap secret path.'
+Assert-Contains $bootstrap 'docker compose build control-plane agent web ark' 'Unix bootstrap must build the runtime image used by the agent.'
+Assert-Contains $bootstrapPs 'docker compose build control-plane agent web ark' 'PowerShell bootstrap must build the runtime image used by the agent.'
+Assert-Contains $readme 'scripts/bootstrap.sh' 'Quick start must provision required local secrets through bootstrap.'
 Assert-Contains $compose 'control-plane-enrollment-ca' 'Enrollment CA must use a dedicated Docker volume.'
 Assert-Contains $compose 'ENROLLMENT_CA_CERT_FILE' 'Control-plane enrollment signer certificate path is missing.'
 Assert-Contains $compose 'AGENT_ENROLLMENT_CA_FILE' 'Agent enrollment CA trust path is missing.'
@@ -127,6 +133,12 @@ $copyEnrollmentCA = $tlsInit.LastIndexOf('cp "$enrollment_out/ca.pem" "$out/enro
 $lastTLSReset = $tlsInit.LastIndexOf('rm -f "$out"/*')
 if ($copyEnrollmentCA -lt 0 -or $copyEnrollmentCA -lt $lastTLSReset) {
     $failures.Add('Fresh tls-init bootstrap must copy enrollment-ca.pem after clearing generated TLS files.')
+}
+
+$consumeToken = $enrollmentHandler.IndexOf('UPDATE node_enrollments SET consumed_at=now()')
+$signerRead = $enrollmentHandler.IndexOf('os.ReadFile(certFile)')
+if ($consumeToken -lt 0 -or $signerRead -lt 0 -or $consumeToken -lt $signerRead) {
+    $failures.Add('Enrollment tokens must not be consumed before the signer is readable and ready.')
 }
 
 if ($failures.Count -gt 0) {

@@ -37,6 +37,7 @@ function Assert-Status([object]$Response, [int]$Expected, [string]$Message) {
 }
 
 function Remove-ProbeVolumes {
+    try { & docker rm -f $containerName 2>$null | Out-Null } catch {}
     foreach ($suffixName in $volumeSuffixes) {
         try { & docker volume rm "ark-asa-platform_${instanceID}${suffixName}" 2>$null | Out-Null } catch {}
     }

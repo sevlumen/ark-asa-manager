@@ -52,6 +52,7 @@ function Get-Container([string]$name) {
 }
 
 function Remove-ProbeVolumes([string]$id) {
+    try { & docker rm -f "ark-$id" 2>$null | Out-Null } catch {}
     foreach ($suffixName in $volumeSuffixes) {
         $volume = "ark-asa-platform_${id}${suffixName}"
         try { & docker volume rm $volume 2>$null | Out-Null } catch {}

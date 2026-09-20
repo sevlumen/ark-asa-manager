@@ -40,7 +40,7 @@ if [[ ! -s .secrets/admin_bootstrap_password ]]; then
   echo "Created the local admin bootstrap secret at .secrets/admin_bootstrap_password."
 fi
 
-docker compose build control-plane agent web
+docker compose build control-plane agent web ark
 docker compose up -d postgres control-plane socket-proxy agent web
 docker compose ps
 curl --fail --retry 10 --retry-delay 2 http://127.0.0.1:8080/readyz
