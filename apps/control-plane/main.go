@@ -646,6 +646,10 @@ func validRole(value string) bool {
 	return value == "admin" || value == "operator" || value == "viewer"
 }
 
+func currentUserRoleChangeAllowed(targetID, principalID, requestedRole, currentRole string) bool {
+	return targetID != principalID || requestedRole == currentRole
+}
+
 func (s *server) login(w http.ResponseWriter, r *http.Request) {
 	var input struct{ Username, Password string }
 	if !decodeJSON(w, r, &input) {
@@ -1094,6 +1098,10 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := currentPrincipal(r)
+	if input.Role != nil && !currentUserRoleChangeAllowed(id, p.ID, *input.Role, currentRole) {
+		writeError(w, 409, "conflict", "cannot change the current user's role")
+		return
+	}
 	if input.Disabled != nil && *input.Disabled && id == p.ID {
 		writeError(w, 409, "conflict", "cannot disable the current user")
 		return

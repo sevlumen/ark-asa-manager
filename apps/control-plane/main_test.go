@@ -119,3 +119,16 @@ func TestUserUpdateGuards(t *testing.T) {
 		t.Fatal("unsupported role validated")
 	}
 }
+
+func TestUserUpdateRequiresSeparateAdministratorForRoleChanges(t *testing.T) {
+	// The handler enforces this invariant before any database mutation: an
+	// administrator must use another active administrator to change roles.
+	// Keep the rule explicit in the unit suite so a future refactor cannot
+	// accidentally leave only the UI guard in place.
+	if currentUserRoleChangeAllowed("admin-1", "admin-1", "viewer", "admin") {
+		t.Fatal("current user role changes must be rejected")
+	}
+	if !currentUserRoleChangeAllowed("admin-1", "admin-2", "viewer", "admin") {
+		t.Fatal("role changes for another user should remain allowed")
+	}
+}
