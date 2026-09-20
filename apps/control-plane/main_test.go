@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +50,20 @@ func TestCursorRoundTrip(t *testing.T) {
 	}
 	if _, err := decodeCursor("%%%", 1); err == nil {
 		t.Fatal("invalid cursor should fail")
+	}
+}
+
+func TestWebsocketOriginAllowsConfiguredOrSameHostOnly(t *testing.T) {
+	request := httptest.NewRequest("GET", "http://localhost:8088/api/v1/ws", nil)
+	request.Host = "localhost:8088"
+	if !websocketOriginAllowed(request, "http://localhost:3000", "http://localhost:8088") {
+		t.Fatal("same-host reverse-proxy origin should be allowed")
+	}
+	if !websocketOriginAllowed(request, "http://localhost:3000", "http://localhost:3000") {
+		t.Fatal("configured public origin should be allowed")
+	}
+	if websocketOriginAllowed(request, "http://localhost:3000", "http://evil.example") {
+		t.Fatal("unrelated origin must be rejected")
 	}
 }
 
