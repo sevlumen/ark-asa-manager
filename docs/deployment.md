@@ -44,7 +44,8 @@ An administrator can register a node from the **Nodes** page. The API returns a
 one-use enrollment token valid for 15 minutes; copy it into a Docker secret or
 other protected file and configure a new agent with `NODE_ID`,
 `NODE_ENROLLMENT_TOKEN_FILE`, and writable `AGENT_TLS_CERT_FILE`/
-`AGENT_TLS_KEY_FILE` paths. The agent generates its own private key and CSR,
+`AGENT_TLS_KEY_FILE` paths (the Compose agent state volume is mounted at
+`/var/lib/ark-agent`). The agent generates its own private key and CSR,
 then exchanges the token for a client certificate. The enrollment CA key stays
 in its dedicated control-plane volume and is never mounted into the agent.
 

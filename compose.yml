@@ -130,6 +130,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - control-plane-tls:/run/ark-tls:ro
+      - agent-state:/var/lib/ark-agent
     ports:
       - "${AGENT_PORT:-8090}:8090"
     restart: unless-stopped
@@ -268,6 +269,7 @@ volumes:
   postgres-data:
   control-plane-tls:
   control-plane-enrollment-ca:
+  agent-state:
   ark-game:
   ark-save:
   ark-config:
