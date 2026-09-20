@@ -29,12 +29,30 @@ if ($envText -match '(?m)^POSTGRES_PASSWORD=(?:$|change-me$)') {
     Write-Output 'Generated a PostgreSQL password in .env.'
 }
 
+if ($envText -notmatch '(?m)^ADMIN_USERNAME=') {
+    $envText = $envText.TrimEnd() + "`r`nADMIN_USERNAME=admin`r`n"
+    Set-Content -Path $envPath -Value $envText -NoNewline
+}
+
+$secretDir = Join-Path $root '.secrets'
+$adminSecretPath = Join-Path $secretDir 'admin_bootstrap_password'
+New-Item -ItemType Directory -Path $secretDir -Force | Out-Null
+if (-not (Test-Path $adminSecretPath) -or [string]::IsNullOrWhiteSpace((Get-Content $adminSecretPath -Raw))) {
+    [IO.File]::WriteAllText($adminSecretPath, "$(New-PostgresPassword)`r`n", [Text.UTF8Encoding]::new($false))
+    Write-Output 'Created the local admin bootstrap secret at .secrets\admin_bootstrap_password.'
+}
+
 # Keep the local environment file private on Windows as well as Unix hosts.
 $acl = Get-Acl $envPath
 $acl.SetAccessRuleProtection($true, $false)
 $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, 'FullControl', 'Allow')
 $acl.SetAccessRule($rule)
 Set-Acl -Path $envPath -AclObject $acl
+$secretAcl = Get-Acl $adminSecretPath
+$secretAcl.SetAccessRuleProtection($true, $false)
+$secretRule = New-Object System.Security.AccessControl.FileSystemAccessRule($env:USERNAME, 'FullControl', 'Allow')
+$secretAcl.SetAccessRule($secretRule)
+Set-Acl -Path $adminSecretPath -AclObject $secretAcl
 
 docker compose build control-plane agent web
 if ($LASTEXITCODE -ne 0) { throw 'Docker image build failed.' }

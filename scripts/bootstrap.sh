@@ -28,6 +28,18 @@ elif grep -q '^POSTGRES_PASSWORD=\(\|change-me\)$' .env; then
   echo "Replaced the unsafe PostgreSQL development password in .env."
 fi
 
+if ! grep -q '^ADMIN_USERNAME=' .env; then
+  printf '\nADMIN_USERNAME=admin\n' >> .env
+fi
+
+mkdir -p .secrets
+if [[ ! -s .secrets/admin_bootstrap_password ]]; then
+  umask 077
+  generate_postgres_password > .secrets/admin_bootstrap_password
+  chmod 600 .secrets/admin_bootstrap_password
+  echo "Created the local admin bootstrap secret at .secrets/admin_bootstrap_password."
+fi
+
 docker compose build control-plane agent web
 docker compose up -d postgres control-plane socket-proxy agent web
 docker compose ps
