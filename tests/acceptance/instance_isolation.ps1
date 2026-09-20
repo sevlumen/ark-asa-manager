@@ -41,9 +41,13 @@ function Get-Instance([string]$id) {
 }
 
 function Get-Container([string]$name) {
-    $raw = docker inspect $name 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
-    return ($raw -join "`n") | ConvertFrom-Json | Select-Object -First 1
+    try {
+        $raw = & docker inspect $name 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $raw) { return $null }
+        return ($raw -join "`n") | ConvertFrom-Json | Select-Object -First 1
+    } catch {
+        return $null
+    }
 }
 
 $writeHeaders = @{}
