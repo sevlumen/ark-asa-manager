@@ -216,6 +216,24 @@ func TestLifecycleActionConflicts(t *testing.T) {
 	}
 }
 
+func TestDesiredStateForAction(t *testing.T) {
+	for _, test := range []struct {
+		action, want string
+	}{
+		{"start", "running"},
+		{"restart", "running"},
+		{"stop", "stopped"},
+	} {
+		got, ok := desiredStateForAction(test.action)
+		if !ok || got != test.want {
+			t.Fatalf("desired state for %q = %q, %v; want %q, true", test.action, got, ok, test.want)
+		}
+	}
+	if got, ok := desiredStateForAction("backup"); ok || got != "" {
+		t.Fatalf("backup should not change desired state: %q, %v", got, ok)
+	}
+}
+
 func TestDecodeHeartbeatPayloadRejectsMalformedJSON(t *testing.T) {
 	if _, err := decodeHeartbeatPayload(strings.NewReader("{not-json")); err == nil {
 		t.Fatal("malformed heartbeat JSON should be rejected")

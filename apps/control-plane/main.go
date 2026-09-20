@@ -916,12 +916,24 @@ func (s *server) createInstance(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "desired_state must be running or stopped")
 		return
 	}
-	_, err := s.db.Exec(r.Context(), `INSERT INTO instances (id,node_id,map_name,cluster_id,desired_state) VALUES ($1,$2,$3,$4,$5)`, input.ID, input.NodeID, input.Map, input.ClusterID, input.DesiredState)
+	tx, err := s.db.Begin(r.Context())
 	if err != nil {
+		writeError(w, 500, "internal_error", "could not create instance")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	if _, err = tx.Exec(r.Context(), `INSERT INTO instances (id,node_id,map_name,cluster_id,desired_state) VALUES ($1,$2,$3,$4,$5)`, input.ID, input.NodeID, input.Map, input.ClusterID, input.DesiredState); err != nil {
 		writeError(w, 409, "conflict", "instance or node does not exist")
 		return
 	}
-	_, _ = s.db.Exec(r.Context(), `INSERT INTO instance_status (instance_id) VALUES ($1) ON CONFLICT DO NOTHING`, input.ID)
+	if _, err = tx.Exec(r.Context(), `INSERT INTO instance_status (instance_id) VALUES ($1) ON CONFLICT DO NOTHING`, input.ID); err != nil {
+		writeError(w, 500, "internal_error", "could not initialize instance status")
+		return
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		writeError(w, 500, "internal_error", "could not create instance")
+		return
+	}
 	s.recordAudit(r.Context(), p.Username, "instance.create", "instance:"+input.ID, map[string]any{"outcome": "allowed"})
 	writeJSON(w, 201, map[string]any{"id": input.ID, "node_id": input.NodeID, "map": input.Map, "map_name": input.Map, "cluster_id": input.ClusterID, "desired_state": input.DesiredState, "observed_state": "unknown", "health": "unknown"})
 }
@@ -996,19 +1008,45 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not create job")
 		return
 	}
-	payload, _ := json.Marshal(payloadValues)
-	if _, err = s.db.Exec(r.Context(), `INSERT INTO jobs (id,instance_id,kind,payload,created_by) VALUES ($1,$2,$3,$4,$5)`, jobID, id, action, payload, p.ID); err != nil {
+	payload, err := json.Marshal(payloadValues)
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not encode action")
+		return
+	}
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
 		writeError(w, 500, "internal_error", "could not enqueue job")
 		return
 	}
-	if action == "start" || action == "restart" {
-		_, _ = s.db.Exec(r.Context(), `UPDATE instances SET desired_state='running',updated_at=now() WHERE id=$1`, id)
-	} else if action == "stop" {
-		_, _ = s.db.Exec(r.Context(), `UPDATE instances SET desired_state='stopped',updated_at=now() WHERE id=$1`, id)
+	defer tx.Rollback(r.Context())
+	if _, err = tx.Exec(r.Context(), `INSERT INTO jobs (id,instance_id,kind,payload,created_by) VALUES ($1,$2,$3,$4,$5)`, jobID, id, action, payload, p.ID); err != nil {
+		writeError(w, 500, "internal_error", "could not enqueue job")
+		return
+	}
+	if desiredState, ok := desiredStateForAction(action); ok {
+		if _, err = tx.Exec(r.Context(), `UPDATE instances SET desired_state=$2,updated_at=now() WHERE id=$1`, id, desiredState); err != nil {
+			writeError(w, 500, "internal_error", "could not update desired state")
+			return
+		}
+	}
+	if err = tx.Commit(r.Context()); err != nil {
+		writeError(w, 500, "internal_error", "could not enqueue job")
+		return
 	}
 	s.appendEvent(r.Context(), "job.queued", "job", jobID, map[string]any{"instance_id": id, "kind": action})
 	s.recordAudit(r.Context(), p.Username, "instance.action", "instance:"+id, map[string]any{"action": action, "outcome": "allowed", "job_id": jobID})
 	writeJSON(w, 202, map[string]any{"id": jobID, "status": "queued", "instance_id": id, "kind": action})
+}
+
+func desiredStateForAction(action string) (string, bool) {
+	switch action {
+	case "start", "restart":
+		return "running", true
+	case "stop":
+		return "stopped", true
+	default:
+		return "", false
+	}
 }
 
 func lifecycleActionConflicts(action, observedState string) bool {
