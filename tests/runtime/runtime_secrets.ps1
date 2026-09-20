@@ -58,9 +58,10 @@ Assert-NotContains $entrypoint '?RCONEnabled=True?RCONPort=' 'Entrypoint must no
 $image = 'ark-asa-runtime:local'
 if (docker image inspect $image 2>$null) {
     # The running Compose service may still use the previous image digest while
-    # a rebuilt local tag is waiting for an intentional redeploy. Probe the
-    # service container first so the test exercises the runtime actually in use.
-    $runtimeContainer = docker compose ps -q ark 2>$null | Select-Object -First 1
+    # a rebuilt local tag is waiting for an intentional redeploy. Use the
+    # Compose label directly so this probe does not parse compose.yml or require
+    # unrelated environment such as POSTGRES_PASSWORD.
+    $runtimeContainer = docker ps --filter 'label=com.docker.compose.service=ark' --filter 'status=running' --format '{{.ID}}' | Select-Object -First 1
     if (-not $runtimeContainer) {
         $runtimeContainer = docker ps --filter "ancestor=$image" --filter 'status=running' --format '{{.ID}}' | Select-Object -First 1
     }
