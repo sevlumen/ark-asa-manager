@@ -62,6 +62,11 @@ type observedInstance struct {
 	Health        string `json:"health"`
 }
 
+type memoryMetrics struct {
+	TotalBytes int64 `json:"total_bytes"`
+	UsedBytes  int64 `json:"used_bytes"`
+}
+
 type desiredInstance struct {
 	InstanceID   string         `json:"instance_id"`
 	DesiredState string         `json:"desired_state"`
@@ -189,7 +194,12 @@ func (a *agent) heartbeat() error {
 		state := normalizeObservedState(item.State)
 		instances = append(instances, observedInstance{InstanceID: instanceID, ContainerID: item.ID, ObservedState: state, Health: health})
 	}
-	body, err := json.Marshal(map[string]any{"instances": instances})
+	memory := a.memoryMetrics(containers)
+	payload := map[string]any{"instances": instances}
+	if memory.TotalBytes > 0 {
+		payload["memory"] = memory
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
@@ -235,6 +245,33 @@ func (a *agent) heartbeat() error {
 		}
 	}
 	return nil
+}
+
+func (a *agent) memoryMetrics(containers []container) memoryMetrics {
+	var info struct {
+		MemTotal int64 `json:"MemTotal"`
+	}
+	if err := a.dockerJSON(http.MethodGet, "/info", nil, &info); err != nil || info.MemTotal <= 0 {
+		return memoryMetrics{}
+	}
+	var used int64
+	for _, item := range containers {
+		if item.State != "running" || item.ID == "" {
+			continue
+		}
+		var stats struct {
+			MemoryStats struct {
+				Usage int64 `json:"usage"`
+			} `json:"memory_stats"`
+		}
+		if err := a.dockerJSON(http.MethodGet, "/containers/"+item.ID+"/stats?stream=false", nil, &stats); err == nil && stats.MemoryStats.Usage > 0 {
+			used += stats.MemoryStats.Usage
+		}
+	}
+	if used > info.MemTotal {
+		used = info.MemTotal
+	}
+	return memoryMetrics{TotalBytes: info.MemTotal, UsedBytes: used}
 }
 
 func normalizeObservedState(state string) string {

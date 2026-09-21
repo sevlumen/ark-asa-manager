@@ -2,7 +2,9 @@
   "name": "ark-asa-web",
   "private": true,
   "scripts": {
-    "build": "bun run build.ts",
+    "build": "vite build",
+    "build:legacy": "bun run build.ts",
+    "dev": "vite",
     "start": "bun run serve.ts"
   },
   "dependencies": {
@@ -12,5 +14,8 @@
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  }
 }

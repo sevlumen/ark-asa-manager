@@ -557,6 +557,9 @@ components:
         endpoint: { type: string, format: uri }
         status: { type: string, enum: [unknown, online, offline, degraded] }
         last_heartbeat: { type: string, format: date-time, nullable: true }
+        memory_total_bytes: { type: integer, format: int64, minimum: 0 }
+        memory_used_bytes: { type: integer, format: int64, minimum: 0 }
+        memory_observed_at: { type: string, format: date-time, nullable: true }
         enrollment_token: { type: string, nullable: true, writeOnly: true }
         enrollment_expires_at: { type: string, format: date-time, nullable: true }
     AgentEnrollmentRequest:

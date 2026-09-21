@@ -64,6 +64,15 @@ func TestOpenAPIContractHasRequiredOperations(t *testing.T) {
 			t.Errorf("operation %s has no response schema", route)
 		}
 	}
+	nodeSchema, ok := doc.Components.Schemas["Node"]
+	if !ok || nodeSchema.Value == nil {
+		t.Fatal("missing Node schema")
+	}
+	for property := range map[string]bool{"memory_total_bytes": true, "memory_used_bytes": true, "memory_observed_at": true} {
+		if _, exists := nodeSchema.Value.Properties[property]; !exists {
+			t.Errorf("Node schema missing %s", property)
+		}
+	}
 }
 
 func splitRoute(route string) (string, string) {

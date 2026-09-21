@@ -330,3 +330,23 @@ func TestDecodeHeartbeatPayloadRejectsMalformedJSON(t *testing.T) {
 		t.Fatalf("valid heartbeat JSON was not parsed: %#v, %v", parsed, err)
 	}
 }
+
+func TestDecodeHeartbeatPayloadValidatesMemoryMetrics(t *testing.T) {
+	parsed, err := decodeHeartbeatPayload(strings.NewReader(`{"memory":{"total_bytes":4096,"used_bytes":1024}}`))
+	if err != nil || parsed.Memory == nil || parsed.Memory.TotalBytes != 4096 || parsed.Memory.UsedBytes != 1024 {
+		t.Fatalf("valid memory metrics were not parsed: %#v, %v", parsed, err)
+	}
+	if _, err := decodeHeartbeatPayload(strings.NewReader(`{"memory":{"total_bytes":0,"used_bytes":0}}`)); err == nil {
+		t.Fatal("zero total memory must be rejected")
+	}
+	if _, err := decodeHeartbeatPayload(strings.NewReader(`{"memory":{"total_bytes":1024,"used_bytes":2048}}`)); err == nil {
+		t.Fatal("used memory above total must be rejected")
+	}
+}
+
+func TestDecodeHeartbeatPayloadKeepsLegacyPayloadCompatible(t *testing.T) {
+	parsed, err := decodeHeartbeatPayload(strings.NewReader(`{"instances":[]}`))
+	if err != nil || parsed.Memory != nil {
+		t.Fatalf("legacy heartbeat payload should remain valid: %#v, %v", parsed, err)
+	}
+}

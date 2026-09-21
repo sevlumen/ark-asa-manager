@@ -532,12 +532,21 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "invalid heartbeat payload")
 		return
 	}
-	result, err := s.db.Exec(r.Context(), `UPDATE nodes SET status='online',last_heartbeat=now(),updated_at=now() WHERE id=$1`, nodeID)
+	var rowsAffected int64
+	if input.Memory != nil {
+		result, execErr := s.db.Exec(r.Context(), `UPDATE nodes SET status='online',last_heartbeat=now(),memory_total_bytes=$2,memory_used_bytes=$3,memory_observed_at=now(),updated_at=now() WHERE id=$1`, nodeID, input.Memory.TotalBytes, input.Memory.UsedBytes)
+		err = execErr
+		rowsAffected = result.RowsAffected()
+	} else {
+		result, execErr := s.db.Exec(r.Context(), `UPDATE nodes SET status='online',last_heartbeat=now(),updated_at=now() WHERE id=$1`, nodeID)
+		err = execErr
+		rowsAffected = result.RowsAffected()
+	}
 	if err != nil {
 		writeError(w, 500, "internal_error", "could not update heartbeat")
 		return
 	}
-	if result.RowsAffected() != 1 {
+	if rowsAffected != 1 {
 		writeError(w, 404, "not_found", "node not found")
 		return
 	}
@@ -628,24 +637,28 @@ GROUP BY i.id,i.desired_state,i.map_name,i.cluster_id`, nodeID)
 	writeJSON(w, 200, map[string]any{"node_id": nodeID, "status": "online", "observed_at": time.Now().UTC(), "desired_instances": desired})
 }
 
-func decodeHeartbeatPayload(reader io.Reader) (struct {
+type heartbeatMemory struct {
+	TotalBytes int64 `json:"total_bytes"`
+	UsedBytes  int64 `json:"used_bytes"`
+}
+
+type heartbeatPayload struct {
+	Memory    *heartbeatMemory `json:"memory"`
 	Instances []struct {
 		InstanceID    string `json:"instance_id"`
 		ContainerID   string `json:"container_id"`
 		ObservedState string `json:"observed_state"`
 		Health        string `json:"health"`
 	} `json:"instances"`
-}, error) {
-	var input struct {
-		Instances []struct {
-			InstanceID    string `json:"instance_id"`
-			ContainerID   string `json:"container_id"`
-			ObservedState string `json:"observed_state"`
-			Health        string `json:"health"`
-		} `json:"instances"`
-	}
+}
+
+func decodeHeartbeatPayload(reader io.Reader) (heartbeatPayload, error) {
+	var input heartbeatPayload
 	if err := json.NewDecoder(reader).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
 		return input, err
+	}
+	if input.Memory != nil && (input.Memory.TotalBytes <= 0 || input.Memory.UsedBytes < 0 || input.Memory.UsedBytes > input.Memory.TotalBytes) {
+		return input, errors.New("invalid memory metrics")
 	}
 	return input, nil
 }
@@ -788,7 +801,7 @@ func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
 	if cursorError(w, err) {
 		return
 	}
-	query := `SELECT id,name,endpoint,status,last_heartbeat,created_at FROM nodes`
+	query := `SELECT id,name,endpoint,status,last_heartbeat,created_at,memory_total_bytes,memory_used_bytes,memory_observed_at FROM nodes`
 	args := []any{limit + 1}
 	if len(parts) == 2 {
 		query += ` WHERE (name,id) > ($2,$3)`
@@ -804,12 +817,13 @@ func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
 	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id, name, endpoint, status string
-		var heartbeat, created *time.Time
-		if err := rows.Scan(&id, &name, &endpoint, &status, &heartbeat, &created); err != nil {
+		var heartbeat, created, memoryObserved *time.Time
+		var memoryTotal, memoryUsed int64
+		if err := rows.Scan(&id, &name, &endpoint, &status, &heartbeat, &created, &memoryTotal, &memoryUsed, &memoryObserved); err != nil {
 			writeError(w, 500, "internal_error", "could not read nodes")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created})
+		items = append(items, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created, "memory_total_bytes": memoryTotal, "memory_used_bytes": memoryUsed, "memory_observed_at": memoryObserved})
 	}
 	next := ""
 	if len(items) > limit {
@@ -822,8 +836,9 @@ func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
 func (s *server) node(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var name, endpoint, status string
-	var heartbeat, created *time.Time
-	err := s.db.QueryRow(r.Context(), `SELECT name,endpoint,status,last_heartbeat,created_at FROM nodes WHERE id=$1`, id).Scan(&name, &endpoint, &status, &heartbeat, &created)
+	var heartbeat, created, memoryObserved *time.Time
+	var memoryTotal, memoryUsed int64
+	err := s.db.QueryRow(r.Context(), `SELECT name,endpoint,status,last_heartbeat,created_at,memory_total_bytes,memory_used_bytes,memory_observed_at FROM nodes WHERE id=$1`, id).Scan(&name, &endpoint, &status, &heartbeat, &created, &memoryTotal, &memoryUsed, &memoryObserved)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 404, "not_found", "node not found")
 		return
@@ -832,7 +847,7 @@ func (s *server) node(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not read node")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created})
+	writeJSON(w, 200, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created, "memory_total_bytes": memoryTotal, "memory_used_bytes": memoryUsed, "memory_observed_at": memoryObserved})
 }
 
 func (s *server) createNode(w http.ResponseWriter, r *http.Request) {

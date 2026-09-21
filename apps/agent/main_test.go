@@ -4,11 +4,51 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
 	"testing"
 )
+
+func TestMemoryMetricsReportsRunningManagedContainerUsage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/info":
+			_, _ = w.Write([]byte(`{"MemTotal":1000}`))
+		case "/containers/c-running/stats":
+			_, _ = w.Write([]byte(`{"memory_stats":{"usage":250}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	a := &agent{cfg: config{dockerHost: server.URL}, docker: server.Client()}
+	got := a.memoryMetrics([]container{
+		{ID: "c-running", State: "running"},
+		{ID: "c-stopped", State: "exited"},
+	})
+	if got != (memoryMetrics{TotalBytes: 1000, UsedBytes: 250}) {
+		t.Fatalf("memory metrics = %+v", got)
+	}
+}
+
+func TestMemoryMetricsClampsAggregateUsageToHostTotal(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/info" {
+			_, _ = w.Write([]byte(`{"MemTotal":1000}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"memory_stats":{"usage":700}}`))
+	}))
+	defer server.Close()
+	a := &agent{cfg: config{dockerHost: server.URL}, docker: server.Client()}
+	got := a.memoryMetrics([]container{{ID: "one", State: "running"}, {ID: "two", State: "running"}})
+	if got.UsedBytes != 1000 {
+		t.Fatalf("aggregate usage = %d, want clamp to 1000", got.UsedBytes)
+	}
+}
 
 func TestDockerBaseURL(t *testing.T) {
 	if got := dockerBaseURL("tcp://socket-proxy:2375"); got != "http://socket-proxy:2375" {
