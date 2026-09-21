@@ -940,6 +940,14 @@ func (s *server) agentEnroll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "csr identity or signature is invalid")
 		return
 	}
+	var enrolledNode string
+	if err = s.db.QueryRow(r.Context(), `SELECT node_id FROM node_enrollments WHERE token_hash=$1 AND node_id=$2 AND consumed_at IS NULL AND expires_at>now()`, hashToken(input.Token), input.NodeID).Scan(&enrolledNode); errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 401, "unauthorized", "invalid or expired enrollment token")
+		return
+	} else if err != nil {
+		writeError(w, 500, "internal_error", "could not validate enrollment token")
+		return
+	}
 	certFile := os.Getenv("ENROLLMENT_CA_CERT_FILE")
 	keyFile := os.Getenv("ENROLLMENT_CA_KEY_FILE")
 	if certFile == "" || keyFile == "" {
@@ -997,7 +1005,6 @@ func (s *server) agentEnroll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not issue node certificate")
 		return
 	}
-	var enrolledNode string
 	err = s.db.QueryRow(r.Context(), `UPDATE node_enrollments SET consumed_at=now() WHERE token_hash=$1 AND node_id=$2 AND consumed_at IS NULL AND expires_at>now() RETURNING node_id`, hashToken(input.Token), input.NodeID).Scan(&enrolledNode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 401, "unauthorized", "invalid or expired enrollment token")
@@ -1727,9 +1734,19 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 	if input.Role != nil && *input.Role != "admin" {
 		removesActiveAdmin = true
 	}
+	tx, err := s.db.Begin(r.Context())
+	if err != nil {
+		writeError(w, 500, "internal_error", "could not update user")
+		return
+	}
+	defer tx.Rollback(r.Context())
 	if removesActiveAdmin && currentRole == "admin" && disabledAt == nil {
+		if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtext('ark-active-admins'))`); err != nil {
+			writeError(w, 500, "internal_error", "could not lock administrator update")
+			return
+		}
 		var activeAdmins int
-		if err := s.db.QueryRow(r.Context(), `SELECT count(*) FROM users WHERE role='admin' AND disabled_at IS NULL`).Scan(&activeAdmins); err != nil {
+		if err := tx.QueryRow(r.Context(), `SELECT count(*) FROM users WHERE role='admin' AND disabled_at IS NULL`).Scan(&activeAdmins); err != nil {
 			writeError(w, 500, "internal_error", "could not count active administrators")
 			return
 		}
@@ -1738,12 +1755,6 @@ func (s *server) updateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	tx, err := s.db.Begin(r.Context())
-	if err != nil {
-		writeError(w, 500, "internal_error", "could not update user")
-		return
-	}
-	defer tx.Rollback(r.Context())
 	if _, err = tx.Exec(r.Context(), `UPDATE users SET role=COALESCE($2,role), disabled_at=CASE WHEN $3::boolean IS NULL THEN disabled_at WHEN $3 THEN now() ELSE NULL END, updated_at=now() WHERE id=$1`, id, input.Role, input.Disabled); err != nil {
 		writeError(w, 500, "internal_error", "could not update user")
 		return
