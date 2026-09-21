@@ -6,11 +6,23 @@ ALTER TABLE nodes
     ADD COLUMN IF NOT EXISTS network_tx_bytes BIGINT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS resource_observed_at TIMESTAMPTZ;
 
-ALTER TABLE nodes
-    ADD CONSTRAINT nodes_cpu_percent_nonnegative CHECK (cpu_percent >= 0),
-    ADD CONSTRAINT nodes_disk_used_nonnegative CHECK (disk_used_bytes >= 0),
-    ADD CONSTRAINT nodes_network_rx_nonnegative CHECK (network_rx_bytes >= 0),
-    ADD CONSTRAINT nodes_network_tx_nonnegative CHECK (network_tx_bytes >= 0);
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nodes_cpu_percent_nonnegative') THEN
+        ALTER TABLE nodes ADD CONSTRAINT nodes_cpu_percent_nonnegative CHECK (cpu_percent >= 0);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nodes_disk_used_nonnegative') THEN
+        ALTER TABLE nodes ADD CONSTRAINT nodes_disk_used_nonnegative CHECK (disk_used_bytes >= 0);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nodes_network_rx_nonnegative') THEN
+        ALTER TABLE nodes ADD CONSTRAINT nodes_network_rx_nonnegative CHECK (network_rx_bytes >= 0);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'nodes_network_tx_nonnegative') THEN
+        ALTER TABLE nodes ADD CONSTRAINT nodes_network_tx_nonnegative CHECK (network_tx_bytes >= 0);
+    END IF;
+END $$;
+-- +goose StatementEnd
 
 -- +goose Down
 ALTER TABLE nodes
