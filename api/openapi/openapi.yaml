@@ -611,9 +611,10 @@ components:
         observed_state: { type: string, enum: [unknown, creating, running, stopped, failed, updating] }
         ports:
           type: object
-          required: [game, query, rcon]
+          required: [game, peer, query, rcon]
           properties:
             game: { type: integer, minimum: 1, maximum: 65535 }
+            peer: { type: integer, minimum: 1, maximum: 65535 }
             query: { type: integer, minimum: 1, maximum: 65535 }
             rcon: { type: integer, minimum: 1, maximum: 65535 }
         storage: { $ref: '#/components/schemas/StorageSpec' }

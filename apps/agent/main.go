@@ -402,17 +402,20 @@ type dockerCreateRequest struct {
 
 func (a *agent) createManagedContainer(desired desiredInstance) error {
 	gamePort, gameOK := desired.Ports["game"]
+	peerPort, peerOK := desired.Ports["peer"]
 	queryPort, queryOK := desired.Ports["query"]
 	rconPort := desired.Ports["rcon"]
-	if !gameOK || !queryOK || gamePort < 1 || queryPort < 1 {
+	if !gameOK || !peerOK || !queryOK || gamePort < 1 || peerPort < 1 || queryPort < 1 {
 		return errors.New("desired instance has incomplete port allocations")
 	}
 	containerPort := func(port int, protocol string) string { return strconv.Itoa(port) + "/" + protocol }
 	gameKey := containerPort(gamePort, "udp")
+	peerKey := containerPort(peerPort, "udp")
 	queryKey := containerPort(queryPort, "udp")
-	exposed := map[string]struct{}{gameKey: {}, queryKey: {}}
+	exposed := map[string]struct{}{gameKey: {}, peerKey: {}, queryKey: {}}
 	bindings := map[string][]map[string]string{
 		gameKey:  {{"HostPort": strconv.Itoa(gamePort)}},
+		peerKey:  {{"HostPort": strconv.Itoa(peerPort)}},
 		queryKey: {{"HostPort": strconv.Itoa(queryPort)}},
 	}
 	if rconPort > 0 {
@@ -427,6 +430,7 @@ func (a *agent) createManagedContainer(desired desiredInstance) error {
 				"ARK_INSTANCE_ID=" + desired.InstanceID,
 				"ARK_MAP=" + desired.Map,
 				"ARK_PORT=" + strconv.Itoa(gamePort),
+				"ARK_PEER_PORT=" + strconv.Itoa(peerPort),
 				"ARK_QUERY_PORT=" + strconv.Itoa(queryPort),
 				"ARK_RCON_ENABLED=false",
 				"ARK_RCON_PORT=" + strconv.Itoa(rconPort),

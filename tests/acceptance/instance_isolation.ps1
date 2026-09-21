@@ -92,8 +92,9 @@ try {
     }
 
     $gamePorts = @($details[$ids[0]].ports.game, $details[$ids[1]].ports.game)
+    $peerPorts = @($details[$ids[0]].ports.peer, $details[$ids[1]].ports.peer)
     $queryPorts = @($details[$ids[0]].ports.query, $details[$ids[1]].ports.query)
-    if ($gamePorts[0] -eq $gamePorts[1] -or $queryPorts[0] -eq $queryPorts[1]) { throw 'Allocated game/query ports are not isolated' }
+    if ($gamePorts[0] -eq $gamePorts[1] -or $peerPorts[0] -eq $peerPorts[1] -or $queryPorts[0] -eq $queryPorts[1]) { throw 'Allocated game/peer/query ports are not isolated' }
 
     foreach ($id in $ids) {
         $container = $containers[$id]
@@ -104,7 +105,7 @@ try {
             if (-not ($mountNames -contains "ark-asa-platform_$id$suffixName")) { throw "Persistence volume $suffixName missing on $id" }
         }
         $bindings = $container.HostConfig.PortBindings.PSObject.Properties.Name
-        if (-not ($bindings -contains "$($details[$id].ports.game)/udp") -or -not ($bindings -contains "$($details[$id].ports.query)/udp")) { throw "Game/query bindings missing on $id" }
+        if (-not ($bindings -contains "$($details[$id].ports.game)/udp") -or -not ($bindings -contains "$($details[$id].ports.peer)/udp") -or -not ($bindings -contains "$($details[$id].ports.query)/udp")) { throw "Game/peer/query bindings missing on $id" }
     }
 
     foreach ($id in $ids) {

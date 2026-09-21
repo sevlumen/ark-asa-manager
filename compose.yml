@@ -186,6 +186,7 @@ services:
       ARK_INSTANCE_ID: ${ARK_INSTANCE_ID:-theisland}
       ARK_MAP: ${ARK_MAP:-TheIsland_WP}
       ARK_PORT: ${ARK_PORT:-7777}
+      ARK_PEER_PORT: ${ARK_PEER_PORT:-7778}
       ARK_QUERY_PORT: ${ARK_QUERY_PORT:-27015}
       ARK_RCON_ENABLED: ${ARK_RCON_ENABLED:-false}
       ARK_RCON_PORT: ${ARK_RCON_PORT:-32330}
@@ -215,6 +216,7 @@ services:
       - ark-cluster:/opt/ark/data/cluster
     ports:
       - "${ARK_PORT:-7777}:${ARK_PORT:-7777}/udp"
+      - "${ARK_PEER_PORT:-7778}:${ARK_PEER_PORT:-7778}/udp"
       - "${ARK_QUERY_PORT:-27015}:${ARK_QUERY_PORT:-27015}/udp"
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]

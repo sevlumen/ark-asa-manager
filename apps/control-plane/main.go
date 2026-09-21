@@ -297,6 +297,7 @@ type portRequirement struct {
 
 var defaultPortRequirements = []portRequirement{
 	{purpose: "game", protocol: "udp", base: 7777},
+	{purpose: "peer", protocol: "udp", base: 7778},
 	{purpose: "query", protocol: "udp", base: 27015},
 	{purpose: "rcon", protocol: "tcp", base: 32330},
 }

@@ -78,6 +78,7 @@ Assert-Contains $entrypoint 'kill -KILL "$server_pid"' 'Runtime must have a boun
 Assert-Contains $entrypoint 'ARK_GRACEFUL_SHUTDOWN_SECONDS must be a positive integer.' 'Runtime must validate the graceful shutdown timeout.'
 Assert-Contains $compose 'stop_grace_period: 45s' 'ARK Compose service must allow graceful shutdown to complete.'
 Assert-Contains $compose 'ARK_GRACEFUL_SHUTDOWN_SECONDS' 'Compose must expose the graceful shutdown timeout.'
+Assert-Contains $compose 'ARK_PEER_PORT' 'Compose must expose the allocated peer UDP port.'
 Assert-Contains $entrypoint 'config/WindowsServer/GameUserSettings.ini' 'ARK password config must target the Proton ASA WindowsServer config path.'
 Assert-NotContains $entrypoint 'server_query+="?ServerAdminPassword=' 'Admin password must not be passed through the server process argv.'
 Assert-NotContains $entrypoint 'server_query+="?ServerPassword=' 'Server password must not be passed through the server process argv.'
