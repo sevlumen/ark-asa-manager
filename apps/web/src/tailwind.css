@@ -1,3 +1,9 @@
 @import "tailwindcss";
 
 /* Tailwind is isolated here so the existing visual CSS remains untouched. */
+
+/* Light operations theme: keep primary copy readable after Tailwind preflight. */
+body { color: #172536 !important; }
+h1, h2, h3, h4, strong, .table-row, .metric strong, .server-title h3 { color: #172536; }
+.hero-card h2, .topbar h1 { color: #172536; }
+.nav-link.active { color: #172536; }
