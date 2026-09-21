@@ -25,6 +25,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -51,6 +52,7 @@ type container struct {
 	State  string            `json:"State"`
 	Labels map[string]string `json:"Labels"`
 	Health *containerHealth  `json:"Health"`
+	SizeRw int64             `json:"SizeRw"`
 }
 type containerHealth struct {
 	Status string `json:"Status"`
@@ -62,9 +64,13 @@ type observedInstance struct {
 	Health        string `json:"health"`
 }
 
-type memoryMetrics struct {
-	TotalBytes int64 `json:"total_bytes"`
-	UsedBytes  int64 `json:"used_bytes"`
+type resourceMetrics struct {
+	MemoryTotalBytes int64   `json:"memory_total_bytes"`
+	MemoryUsedBytes  int64   `json:"memory_used_bytes"`
+	CPUPercent       float64 `json:"cpu_percent"`
+	DiskUsedBytes    int64   `json:"disk_used_bytes"`
+	NetworkRxBytes   int64   `json:"network_rx_bytes"`
+	NetworkTxBytes   int64   `json:"network_tx_bytes"`
 }
 
 type desiredInstance struct {
@@ -178,7 +184,7 @@ func (a *agent) publicHealth(r *http.Request) error {
 func (a *agent) heartbeat() error {
 	var containers []container
 	filter := dockerLabelFilter("ark.platform.node-id=" + a.cfg.nodeID)
-	if err := a.dockerJSON(http.MethodGet, "/containers/json?all=true&filters="+filter, nil, &containers); err != nil {
+	if err := a.dockerJSON(http.MethodGet, "/containers/json?all=true&size=true&filters="+filter, nil, &containers); err != nil {
 		return fmt.Errorf("discover managed containers: %w", err)
 	}
 	instances := make([]observedInstance, 0, len(containers))
@@ -194,10 +200,10 @@ func (a *agent) heartbeat() error {
 		state := normalizeObservedState(item.State)
 		instances = append(instances, observedInstance{InstanceID: instanceID, ContainerID: item.ID, ObservedState: state, Health: health})
 	}
-	memory := a.memoryMetrics(containers)
+	metrics := a.resourceMetrics(containers)
 	payload := map[string]any{"instances": instances}
-	if memory.TotalBytes > 0 {
-		payload["memory"] = memory
+	if metrics.MemoryTotalBytes > 0 {
+		payload["metrics"] = metrics
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -247,31 +253,110 @@ func (a *agent) heartbeat() error {
 	return nil
 }
 
-func (a *agent) memoryMetrics(containers []container) memoryMetrics {
+func (a *agent) resourceMetrics(containers []container) resourceMetrics {
 	var info struct {
 		MemTotal int64 `json:"MemTotal"`
 	}
 	if err := a.dockerJSON(http.MethodGet, "/info", nil, &info); err != nil || info.MemTotal <= 0 {
-		return memoryMetrics{}
+		return resourceMetrics{}
 	}
-	var used int64
+	metrics := resourceMetrics{MemoryTotalBytes: info.MemTotal}
+	var running []container
 	for _, item := range containers {
-		if item.State != "running" || item.ID == "" {
-			continue
-		}
-		var stats struct {
-			MemoryStats struct {
-				Usage int64 `json:"usage"`
-			} `json:"memory_stats"`
-		}
-		if err := a.dockerJSON(http.MethodGet, "/containers/"+item.ID+"/stats?stream=false", nil, &stats); err == nil && stats.MemoryStats.Usage > 0 {
-			used += stats.MemoryStats.Usage
+		metrics.DiskUsedBytes += maxInt64(item.SizeRw, 0)
+		if item.State == "running" && item.ID != "" {
+			running = append(running, item)
 		}
 	}
-	if used > info.MemTotal {
-		used = info.MemTotal
+	workers := 4
+	if len(running) < workers {
+		workers = len(running)
 	}
-	return memoryMetrics{TotalBytes: info.MemTotal, UsedBytes: used}
+	results := make(chan dockerStats, len(running))
+	jobs := make(chan container)
+	var wait sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for item := range jobs {
+				var stats dockerStats
+				if err := a.dockerJSON(http.MethodGet, "/containers/"+item.ID+"/stats?stream=false", nil, &stats); err == nil {
+					results <- stats
+				}
+			}
+		}()
+	}
+	for _, item := range running {
+		jobs <- item
+	}
+	close(jobs)
+	wait.Wait()
+	close(results)
+	for stats := range results {
+		metrics.MemoryUsedBytes += maxInt64(stats.MemoryStats.Usage, 0)
+		metrics.NetworkRxBytes += maxInt64(stats.NetworkRxBytes(), 0)
+		metrics.NetworkTxBytes += maxInt64(stats.NetworkTxBytes(), 0)
+		if stats.CPUStats.SystemUsage > stats.PreCPUStats.SystemUsage && stats.CPUStats.CPUUsage.TotalUsage > stats.PreCPUStats.CPUUsage.TotalUsage {
+			cpus := stats.CPUStats.OnlineCPUs
+			if cpus <= 0 {
+				cpus = int64(len(stats.CPUStats.CPUUsage.PercpuUsage))
+				if cpus <= 0 {
+					cpus = 1
+				}
+			}
+			metrics.CPUPercent += float64(stats.CPUStats.CPUUsage.TotalUsage-stats.PreCPUStats.CPUUsage.TotalUsage) / float64(stats.CPUStats.SystemUsage-stats.PreCPUStats.SystemUsage) * float64(cpus) * 100
+		}
+	}
+	if metrics.MemoryUsedBytes > info.MemTotal {
+		metrics.MemoryUsedBytes = info.MemTotal
+	}
+	return metrics
+}
+
+type dockerStats struct {
+	MemoryStats struct {
+		Usage int64 `json:"usage"`
+	} `json:"memory_stats"`
+	CPUStats struct {
+		CPUUsage struct {
+			TotalUsage  int64   `json:"total_usage"`
+			PercpuUsage []int64 `json:"percpu_usage"`
+		} `json:"cpu_usage"`
+		SystemUsage int64 `json:"system_cpu_usage"`
+		OnlineCPUs  int64 `json:"online_cpus"`
+	} `json:"cpu_stats"`
+	PreCPUStats struct {
+		CPUUsage struct {
+			TotalUsage int64 `json:"total_usage"`
+		} `json:"cpu_usage"`
+		SystemUsage int64 `json:"system_cpu_usage"`
+	} `json:"precpu_stats"`
+	Networks map[string]struct {
+		RxBytes int64 `json:"rx_bytes"`
+		TxBytes int64 `json:"tx_bytes"`
+	} `json:"networks"`
+}
+
+func (s dockerStats) NetworkRxBytes() int64 {
+	var n int64
+	for _, v := range s.Networks {
+		n += v.RxBytes
+	}
+	return n
+}
+func (s dockerStats) NetworkTxBytes() int64 {
+	var n int64
+	for _, v := range s.Networks {
+		n += v.TxBytes
+	}
+	return n
+}
+func maxInt64(value, minimum int64) int64 {
+	if value < minimum {
+		return minimum
+	}
+	return value
 }
 
 func normalizeObservedState(state string) string {

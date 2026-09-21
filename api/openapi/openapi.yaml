@@ -560,6 +560,11 @@ components:
         memory_total_bytes: { type: integer, format: int64, minimum: 0 }
         memory_used_bytes: { type: integer, format: int64, minimum: 0 }
         memory_observed_at: { type: string, format: date-time, nullable: true }
+        cpu_percent: { type: number, format: double, minimum: 0 }
+        disk_used_bytes: { type: integer, format: int64, minimum: 0 }
+        network_rx_bytes: { type: integer, format: int64, minimum: 0 }
+        network_tx_bytes: { type: integer, format: int64, minimum: 0 }
+        resource_observed_at: { type: string, format: date-time, nullable: true }
         enrollment_token: { type: string, nullable: true, writeOnly: true }
         enrollment_expires_at: { type: string, format: date-time, nullable: true }
     AgentEnrollmentRequest:

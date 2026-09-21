@@ -12,29 +12,29 @@ import (
 	"testing"
 )
 
-func TestMemoryMetricsReportsRunningManagedContainerUsage(t *testing.T) {
+func TestResourceMetricsReportsRunningManagedContainerUsage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/info":
 			_, _ = w.Write([]byte(`{"MemTotal":1000}`))
 		case "/containers/c-running/stats":
-			_, _ = w.Write([]byte(`{"memory_stats":{"usage":250}}`))
+			_, _ = w.Write([]byte(`{"memory_stats":{"usage":250},"networks":{"eth0":{"rx_bytes":100,"tx_bytes":50}}}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer server.Close()
 	a := &agent{cfg: config{dockerHost: server.URL}, docker: server.Client()}
-	got := a.memoryMetrics([]container{
+	got := a.resourceMetrics([]container{
 		{ID: "c-running", State: "running"},
 		{ID: "c-stopped", State: "exited"},
 	})
-	if got != (memoryMetrics{TotalBytes: 1000, UsedBytes: 250}) {
+	if got.MemoryTotalBytes != 1000 || got.MemoryUsedBytes != 250 || got.NetworkRxBytes != 100 || got.NetworkTxBytes != 50 {
 		t.Fatalf("memory metrics = %+v", got)
 	}
 }
 
-func TestMemoryMetricsClampsAggregateUsageToHostTotal(t *testing.T) {
+func TestResourceMetricsClampsAggregateUsageToHostTotal(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/info" {
 			_, _ = w.Write([]byte(`{"MemTotal":1000}`))
@@ -44,9 +44,9 @@ func TestMemoryMetricsClampsAggregateUsageToHostTotal(t *testing.T) {
 	}))
 	defer server.Close()
 	a := &agent{cfg: config{dockerHost: server.URL}, docker: server.Client()}
-	got := a.memoryMetrics([]container{{ID: "one", State: "running"}, {ID: "two", State: "running"}})
-	if got.UsedBytes != 1000 {
-		t.Fatalf("aggregate usage = %d, want clamp to 1000", got.UsedBytes)
+	got := a.resourceMetrics([]container{{ID: "one", State: "running"}, {ID: "two", State: "running"}})
+	if got.MemoryUsedBytes != 1000 {
+		t.Fatalf("aggregate usage = %d, want clamp to 1000", got.MemoryUsedBytes)
 	}
 }
 

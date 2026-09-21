@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -533,7 +534,11 @@ func (s *server) agentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var rowsAffected int64
-	if input.Memory != nil {
+	if input.Metrics != nil {
+		result, execErr := s.db.Exec(r.Context(), `UPDATE nodes SET status='online',last_heartbeat=now(),memory_total_bytes=$2,memory_used_bytes=$3,memory_observed_at=now(),cpu_percent=$4,disk_used_bytes=$5,network_rx_bytes=$6,network_tx_bytes=$7,resource_observed_at=now(),updated_at=now() WHERE id=$1`, nodeID, input.Metrics.MemoryTotalBytes, input.Metrics.MemoryUsedBytes, input.Metrics.CPUPercent, input.Metrics.DiskUsedBytes, input.Metrics.NetworkRxBytes, input.Metrics.NetworkTxBytes)
+		err = execErr
+		rowsAffected = result.RowsAffected()
+	} else if input.Memory != nil {
 		result, execErr := s.db.Exec(r.Context(), `UPDATE nodes SET status='online',last_heartbeat=now(),memory_total_bytes=$2,memory_used_bytes=$3,memory_observed_at=now(),updated_at=now() WHERE id=$1`, nodeID, input.Memory.TotalBytes, input.Memory.UsedBytes)
 		err = execErr
 		rowsAffected = result.RowsAffected()
@@ -642,8 +647,18 @@ type heartbeatMemory struct {
 	UsedBytes  int64 `json:"used_bytes"`
 }
 
+type heartbeatMetrics struct {
+	MemoryTotalBytes int64   `json:"memory_total_bytes"`
+	MemoryUsedBytes  int64   `json:"memory_used_bytes"`
+	CPUPercent       float64 `json:"cpu_percent"`
+	DiskUsedBytes    int64   `json:"disk_used_bytes"`
+	NetworkRxBytes   int64   `json:"network_rx_bytes"`
+	NetworkTxBytes   int64   `json:"network_tx_bytes"`
+}
+
 type heartbeatPayload struct {
-	Memory    *heartbeatMemory `json:"memory"`
+	Metrics   *heartbeatMetrics `json:"metrics"`
+	Memory    *heartbeatMemory  `json:"memory"`
 	Instances []struct {
 		InstanceID    string `json:"instance_id"`
 		ContainerID   string `json:"container_id"`
@@ -656,6 +671,9 @@ func decodeHeartbeatPayload(reader io.Reader) (heartbeatPayload, error) {
 	var input heartbeatPayload
 	if err := json.NewDecoder(reader).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
 		return input, err
+	}
+	if input.Metrics != nil && (input.Metrics.MemoryTotalBytes <= 0 || input.Metrics.MemoryUsedBytes < 0 || input.Metrics.MemoryUsedBytes > input.Metrics.MemoryTotalBytes || input.Metrics.CPUPercent < 0 || math.IsNaN(input.Metrics.CPUPercent) || math.IsInf(input.Metrics.CPUPercent, 0) || input.Metrics.DiskUsedBytes < 0 || input.Metrics.NetworkRxBytes < 0 || input.Metrics.NetworkTxBytes < 0) {
+		return input, errors.New("invalid resource metrics")
 	}
 	if input.Memory != nil && (input.Memory.TotalBytes <= 0 || input.Memory.UsedBytes < 0 || input.Memory.UsedBytes > input.Memory.TotalBytes) {
 		return input, errors.New("invalid memory metrics")
@@ -801,7 +819,7 @@ func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
 	if cursorError(w, err) {
 		return
 	}
-	query := `SELECT id,name,endpoint,status,last_heartbeat,created_at,memory_total_bytes,memory_used_bytes,memory_observed_at FROM nodes`
+	query := `SELECT id,name,endpoint,status,last_heartbeat,created_at,memory_total_bytes,memory_used_bytes,memory_observed_at,cpu_percent,disk_used_bytes,network_rx_bytes,network_tx_bytes,resource_observed_at FROM nodes`
 	args := []any{limit + 1}
 	if len(parts) == 2 {
 		query += ` WHERE (name,id) > ($2,$3)`
@@ -817,13 +835,14 @@ func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
 	items := make([]map[string]any, 0, limit+1)
 	for rows.Next() {
 		var id, name, endpoint, status string
-		var heartbeat, created, memoryObserved *time.Time
-		var memoryTotal, memoryUsed int64
-		if err := rows.Scan(&id, &name, &endpoint, &status, &heartbeat, &created, &memoryTotal, &memoryUsed, &memoryObserved); err != nil {
+		var heartbeat, created, memoryObserved, resourceObserved *time.Time
+		var memoryTotal, memoryUsed, diskUsed, networkRx, networkTx int64
+		var cpu float64
+		if err := rows.Scan(&id, &name, &endpoint, &status, &heartbeat, &created, &memoryTotal, &memoryUsed, &memoryObserved, &cpu, &diskUsed, &networkRx, &networkTx, &resourceObserved); err != nil {
 			writeError(w, 500, "internal_error", "could not read nodes")
 			return
 		}
-		items = append(items, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created, "memory_total_bytes": memoryTotal, "memory_used_bytes": memoryUsed, "memory_observed_at": memoryObserved})
+		items = append(items, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created, "memory_total_bytes": memoryTotal, "memory_used_bytes": memoryUsed, "memory_observed_at": memoryObserved, "cpu_percent": cpu, "disk_used_bytes": diskUsed, "network_rx_bytes": networkRx, "network_tx_bytes": networkTx, "resource_observed_at": resourceObserved})
 	}
 	next := ""
 	if len(items) > limit {
@@ -836,9 +855,10 @@ func (s *server) nodes(w http.ResponseWriter, r *http.Request) {
 func (s *server) node(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var name, endpoint, status string
-	var heartbeat, created, memoryObserved *time.Time
-	var memoryTotal, memoryUsed int64
-	err := s.db.QueryRow(r.Context(), `SELECT name,endpoint,status,last_heartbeat,created_at,memory_total_bytes,memory_used_bytes,memory_observed_at FROM nodes WHERE id=$1`, id).Scan(&name, &endpoint, &status, &heartbeat, &created, &memoryTotal, &memoryUsed, &memoryObserved)
+	var heartbeat, created, memoryObserved, resourceObserved *time.Time
+	var memoryTotal, memoryUsed, diskUsed, networkRx, networkTx int64
+	var cpu float64
+	err := s.db.QueryRow(r.Context(), `SELECT name,endpoint,status,last_heartbeat,created_at,memory_total_bytes,memory_used_bytes,memory_observed_at,cpu_percent,disk_used_bytes,network_rx_bytes,network_tx_bytes,resource_observed_at FROM nodes WHERE id=$1`, id).Scan(&name, &endpoint, &status, &heartbeat, &created, &memoryTotal, &memoryUsed, &memoryObserved, &cpu, &diskUsed, &networkRx, &networkTx, &resourceObserved)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 404, "not_found", "node not found")
 		return
@@ -847,7 +867,7 @@ func (s *server) node(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "internal_error", "could not read node")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created, "memory_total_bytes": memoryTotal, "memory_used_bytes": memoryUsed, "memory_observed_at": memoryObserved})
+	writeJSON(w, 200, map[string]any{"id": id, "name": name, "endpoint": endpoint, "status": effectiveNodeStatus(status, heartbeat, time.Now()), "last_heartbeat": heartbeat, "created_at": created, "memory_total_bytes": memoryTotal, "memory_used_bytes": memoryUsed, "memory_observed_at": memoryObserved, "cpu_percent": cpu, "disk_used_bytes": diskUsed, "network_rx_bytes": networkRx, "network_tx_bytes": networkTx, "resource_observed_at": resourceObserved})
 }
 
 func (s *server) createNode(w http.ResponseWriter, r *http.Request) {

@@ -68,7 +68,7 @@ func TestOpenAPIContractHasRequiredOperations(t *testing.T) {
 	if !ok || nodeSchema.Value == nil {
 		t.Fatal("missing Node schema")
 	}
-	for property := range map[string]bool{"memory_total_bytes": true, "memory_used_bytes": true, "memory_observed_at": true} {
+	for property := range map[string]bool{"memory_total_bytes": true, "memory_used_bytes": true, "memory_observed_at": true, "cpu_percent": true, "disk_used_bytes": true, "network_rx_bytes": true, "network_tx_bytes": true, "resource_observed_at": true} {
 		if _, exists := nodeSchema.Value.Properties[property]; !exists {
 			t.Errorf("Node schema missing %s", property)
 		}
