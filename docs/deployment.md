@@ -3,9 +3,13 @@
 ## Ubuntu
 
 Install Docker Engine and the Compose plugin, copy `.env.example` to `.env`,
-change all passwords, then start the control plane with:
+then run `scripts/bootstrap.sh` (or `scripts/bootstrap.ps1` on Windows). It
+generates the local PostgreSQL/admin bootstrap secrets, protects them, and
+builds the management and runtime images before starting the control plane:
 
 ```bash
+cp .env.example .env
+./scripts/bootstrap.sh
 docker compose up -d postgres control-plane socket-proxy agent web
 docker compose ps
 curl --fail http://127.0.0.1:8080/healthz
@@ -86,6 +90,29 @@ own instances and containers when complete):
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/acceptance/instance_isolation.ps1
 ```
+
+Run the complete disposable acceptance matrix from the repository root with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/acceptance.ps1
+```
+
+The runner fails if any probe container or volume remains after the tests.
+
+## HTTPS reverse proxy
+
+The Caddy profile terminates HTTPS on port `8443` and redirects HTTP from
+`8088`. Set the public origin before starting it so the control plane marks
+session cookies as `Secure`:
+
+```bash
+PUBLIC_ORIGIN=https://localhost:8443 docker compose --profile caddy up -d caddy
+```
+
+For a trusted certificate, replace the development `tls internal` policy in
+`deploy/caddy/Caddyfile` with the host's certificate configuration. Direct
+local development on `http://localhost:3000` should keep the default
+`PUBLIC_ORIGIN=http://localhost:3000`.
 
 ## Agent enrollment
 
