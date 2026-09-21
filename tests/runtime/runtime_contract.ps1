@@ -4,6 +4,7 @@ $root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $dockerfile = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\Dockerfile') -Raw
 $downloader = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\download-runtime.sh') -Raw -ErrorAction SilentlyContinue
 $entrypoint = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\entrypoint.sh') -Raw
+$rconClient = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\rcon_client.py') -Raw
 $healthcheck = Get-Content (Join-Path $root 'deploy\docker\ark-runtime\healthcheck.sh') -Raw
 $compose = Get-Content (Join-Path $root 'compose.yml') -Raw
 $webPackage = Get-Content (Join-Path $root 'apps\web\package.json') -Raw
@@ -68,6 +69,11 @@ Assert-Contains $entrypoint 'ARK_INSTALL_VCREDIST' 'VC++ redistributable install
 Assert-Contains $entrypoint 'proton run /opt/ark/vc_redist.x64.exe' 'VC++ installation must bootstrap a missing Proton prefix.'
 Assert-Contains $entrypoint 'write_ark_passwords_config' 'ARK passwords must be written to the runtime config instead of process argv.'
 Assert-Contains $entrypoint 'kill -TERM "$server_pid"' 'Runtime must request graceful shutdown before force termination.'
+Assert-Contains $entrypoint 'SaveWorld' 'Runtime must request an explicit world save before shutdown.'
+Assert-Contains $entrypoint 'DoExit' 'Runtime must request an explicit game exit after a verified save.'
+Assert-Contains $entrypoint 'refusing to force terminate an unverified save' 'Runtime must not force-kill after an unverified save.'
+Assert-Contains $rconClient 'ARK_RCON_PASSWORD' 'RCON client must receive the password through the environment, not argv.'
+Assert-Contains $rconClient 'RCON authentication failed' 'RCON client must fail closed on authentication errors.'
 Assert-Contains $entrypoint 'kill -KILL "$server_pid"' 'Runtime must have a bounded force-termination fallback.'
 Assert-Contains $entrypoint 'ARK_GRACEFUL_SHUTDOWN_SECONDS must be a positive integer.' 'Runtime must validate the graceful shutdown timeout.'
 Assert-Contains $compose 'stop_grace_period: 45s' 'ARK Compose service must allow graceful shutdown to complete.'

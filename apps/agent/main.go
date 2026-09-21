@@ -450,8 +450,10 @@ func (a *agent) createManagedContainer(desired desiredInstance) error {
 				a.cfg.volumePrefix + "_" + desired.InstanceID + "-backups:/opt/ark/data/backups",
 				a.cfg.volumePrefix + "_" + desired.InstanceID + "-cluster:/opt/ark/data/cluster",
 			},
-			PortBindings:  bindings,
-			RestartPolicy: map[string]any{"Name": "unless-stopped"},
+			PortBindings: bindings,
+			// Desired state is owned by the control plane. Docker must not
+			// independently restart a container reconciled as stopped.
+			RestartPolicy: map[string]any{"Name": "no"},
 			Memory:        a.cfg.memoryLimit,
 			NanoCPUs:      a.cfg.nanoCPUs,
 			LogConfig:     map[string]any{"Type": "json-file", "Config": map[string]string{"max-size": "50m", "max-file": "5"}},

@@ -222,7 +222,28 @@ server_pid=$!
 cleanup() {
   if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
     echo "Requesting graceful ARK shutdown (timeout ${shutdown_seconds}s)" | tee -a "$server_log"
-    kill -TERM "$server_pid" 2>/dev/null || true
+    shutdown_verified=0
+    if [[ "$rcon_enabled" == true && -n "$admin_password" ]]; then
+      save_log_size=0
+      [[ -f "$engine_log" ]] && save_log_size=$(wc -c < "$engine_log")
+      if ARK_RCON_PASSWORD="$admin_password" python3 /usr/local/bin/rcon_client.py 127.0.0.1 "${ARK_RCON_PORT:-32330}" SaveWorld; then
+        for ((shutdown_wait=0; shutdown_wait<shutdown_seconds; shutdown_wait++)); do
+          if [[ -f "$engine_log" ]] && tail -c +$((save_log_size + 1)) "$engine_log" 2>/dev/null | grep -Eiq 'save|saved|saving world'; then
+            shutdown_verified=1
+            break
+          fi
+          sleep 1
+        done
+      else
+        echo 'RCON SaveWorld failed; refusing to force terminate an unverified save.' | tee -a "$server_log"
+      fi
+      if [[ "$shutdown_verified" == 1 ]]; then
+        ARK_RCON_PASSWORD="$admin_password" python3 /usr/local/bin/rcon_client.py 127.0.0.1 "${ARK_RCON_PORT:-32330}" DoExit || true
+      fi
+    fi
+    if [[ "$shutdown_verified" != 1 ]]; then
+      kill -TERM "$server_pid" 2>/dev/null || true
+    fi
     for ((shutdown_wait=0; shutdown_wait<shutdown_seconds; shutdown_wait++)); do
       if ! kill -0 "$server_pid" 2>/dev/null; then
         server_pid=""
@@ -230,9 +251,11 @@ cleanup() {
       fi
       sleep 1
     done
-    if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
+    if [[ "$shutdown_verified" == 1 && -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
       echo "ARK graceful shutdown timed out; forcing process termination" | tee -a "$server_log"
       kill -KILL "$server_pid" 2>/dev/null || true
+    elif [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
+      echo 'ARK shutdown remains pending because world-save completion was not verified.' | tee -a "$server_log"
     fi
   fi
   if [[ -n "$xvfb_pid" ]] && kill -0 "$xvfb_pid" 2>/dev/null; then
