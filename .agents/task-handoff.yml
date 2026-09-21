@@ -1,14 +1,19 @@
+schema_version: 1
 task:
   issue: "#N"
   title: ""
 
 requirements:
   source: "luna-ba"
-  status: "BA_READY"
+  status: "PENDING"
+  actor_id: ""
+  evidence: []
 
 plan:
   source: "luna-planner"
-  status: "PLAN_READY"
+  status: "PENDING"
+  actor_id: ""
+  evidence: []
 
 scope:
   allowed: []
@@ -20,9 +25,55 @@ dependencies:
 
 acceptance: []
 current_stage: "BA"
+head_sha: ""
+base_sha: ""
 owner: ""
 branch: ""
 worktree: ""
 changed_files: []
 evidence: []
 blockers: []
+
+implementation:
+  status: "PENDING"
+  actor_ids: []
+  head_sha: ""
+  evidence: []
+
+# null means not assessed; only an independent assessment can select false.
+security:
+  required: null
+  triggers: []
+  na_reason: ""
+
+# Actual session/thread IDs, not role names. Independent from implementation.
+gates:
+  qc:
+    status: "PENDING"
+    actor_id: ""
+    head_sha: ""
+    base_sha: ""
+    evidence: []
+  review:
+    status: "PENDING"
+    actor_id: ""
+    head_sha: ""
+    base_sha: ""
+    evidence: []
+  security:
+    status: "PENDING"
+    actor_id: ""
+    head_sha: ""
+    base_sha: ""
+    evidence: []
+  release:
+    status: "PENDING"
+    actor_id: ""
+    head_sha: ""
+    base_sha: ""
+    evidence: []
+
+# Each finding: severity, status (OPEN/RESOLVED/ACCEPTED), rationale,
+# evidence: [report references], accepted_by: [review actor ID, release actor ID].
+# Evidence is required for RESOLVED/ACCEPTED; accepted_by for ACCEPTED.
+findings: []

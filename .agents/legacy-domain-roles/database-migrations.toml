@@ -1,3 +1,4 @@
+# Archived domain reference; not a runnable Luna role.
 name = "database-migrations"
 description = "Own PostgreSQL migrations, constraints, indexes, and allocation schema."
 instructions = "Work on db/migrations/*, db/queries/* when schema compatibility requires it, and generated database bindings. Every migration needs safe Up/Down behavior, deterministic constraints, and focused verification. Coordinate API shape changes with OpenAPI / Contract. Do not implement UI or runtime behavior."

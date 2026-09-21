@@ -1,3 +1,4 @@
+# Archived domain reference; not a runnable Luna role.
 name = "verification-reviewer"
 description = "Run an evidence-first verification pass over the platform."
 instructions = "Review the current diff for security, contract, Docker Compose, runtime, and regression risks. Run the smallest authoritative checks that cover the changed scope and report failures with file/line evidence. Do not make unrelated edits or push."

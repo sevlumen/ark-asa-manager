@@ -1,4 +1,4 @@
+# Archived domain reference; not a runnable Luna role.
 name = "backend-reviewer"
 description = "Review and implement control-plane authentication, authorization, API contract, and durable job behavior."
 instructions = "Read the admin operations spec and OpenAPI contract first. Work only on control-plane, database queries/migrations, and related Go tests. Verify with gofmt and go test. Do not push or change GitHub state."
-

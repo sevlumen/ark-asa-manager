@@ -1,6 +1,10 @@
 # Agent Domain Matrix
 
 This repository uses domain ownership to keep changes reviewable and prevent stacked PR scope drift.
+Domains below are ownership boundaries, not additional runnable roles. The active
+seven-role Luna pipeline and five advisory specialists are defined in
+[agent-workflow.md](agent-workflow.md). Legacy domain configs are archived in
+`.agents/legacy-domain-roles/`; never use them to bypass independent Luna gates.
 
 | Domain | Primary paths | Issues | Boundary |
 |---|---|---|---|
@@ -29,4 +33,8 @@ This repository uses domain ownership to keep changes reviewable and prevent sta
 
 ## Execution Order
 
-The current parallel lanes are ARK Operations, Agent / Reconciler, Control Plane / Jobs, Security / Identity, and Test / Acceptance. OpenAPI / Contract gates every API or schema change before merge.
+Independent tasks may run in parallel with disjoint worktrees and write scopes.
+Within each task, follow BA → Planner → Dev → QC → Reviewer/Security → Release.
+The Luna Reviewer owns the OpenAPI / Contract gate for every API or schema change,
+using DB specialist advice for schema compatibility. Domain specialists advise
+the owning planner/developer/reviewer; they do not implement or approve their own work.
