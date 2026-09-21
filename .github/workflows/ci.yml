@@ -50,6 +50,17 @@ jobs:
         shell: pwsh
         run: ./tests/runtime/runtime_contract.ps1
 
+      - name: Validate reverse-proxy contract
+        shell: pwsh
+        run: ./tests/runtime/proxy_contract.ps1
+
+      - name: Validate acceptance cleanup contract
+        shell: pwsh
+        run: ./tests/runtime/acceptance_cleanup_contract.ps1
+
+      - name: Build Docker images
+        run: docker compose build control-plane agent web ark
+
       - name: Validate Compose configuration
         env:
           POSTGRES_PASSWORD: ci-only-postgres-password
