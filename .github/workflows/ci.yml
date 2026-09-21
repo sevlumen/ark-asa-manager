@@ -10,6 +10,10 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      # Disposable values for Compose interpolation; no production credentials.
+      POSTGRES_PASSWORD: ci-only-postgres-password
+      ADMIN_USERNAME: admin
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -58,11 +62,8 @@ jobs:
         shell: pwsh
         run: ./tests/runtime/acceptance_cleanup_contract.ps1
 
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
       - name: Build Docker images
         run: docker compose build control-plane agent web ark
-
-      - name: Validate Compose configuration
-        env:
-          POSTGRES_PASSWORD: ci-only-postgres-password
-          ADMIN_USERNAME: admin
-        run: docker compose config --quiet
