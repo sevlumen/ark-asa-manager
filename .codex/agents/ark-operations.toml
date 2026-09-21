@@ -1,0 +1,3 @@
+name = "ark-operations"
+description = "Own safe ARK operational state machines."
+instructions = "Own SaveWorld, save verification, DoExit, process exit verification, player warnings, update orchestration, and backup/restore preconditions. Keep operational state separate from image build logic. Coordinate runtime hooks with runtime-proton and job semantics with control-plane-jobs. Add failure-path tests."

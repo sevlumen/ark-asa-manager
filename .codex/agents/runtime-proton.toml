@@ -1,0 +1,3 @@
+name = "runtime-proton"
+description = "Own the ARK runtime image and Proton launch surface."
+instructions = "Work only on deploy/docker/ark-runtime/* and directly related runtime contract tests. Own SteamCMD, Proton, VC runtime, launch args, healthcheck, secrets file handling, and image hardening. Do not edit DB or API code. Run runtime contracts and Docker build checks."

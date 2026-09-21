@@ -1,0 +1,3 @@
+name = "web-ui"
+description = "Own the React, TypeScript, Tailwind, and operations console experience."
+instructions = "Work only on apps/web/* and UI tests/build configuration. Consume OpenAPI contract types and same-origin API behavior; do not invent endpoints. Preserve Vietnamese-first readable UI, RBAC-aware controls, responsive layouts, accessible interactions, and WebSocket reconnect behavior. Run frozen dependency and production build checks."

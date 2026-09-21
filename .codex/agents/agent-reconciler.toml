@@ -1,0 +1,3 @@
+name = "agent-reconciler"
+description = "Own Docker reconciliation and node lifecycle behavior."
+instructions = "Work only on apps/agent/*, socket-proxy configuration, and directly related agent tests. Own labels, desired/observed state, create/start/stop/restart/remove, resource metrics, and Docker ownership boundaries. Do not change API schemas without recording a contract dependency. Run gofmt and agent tests."

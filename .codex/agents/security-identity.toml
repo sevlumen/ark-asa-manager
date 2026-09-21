@@ -1,0 +1,3 @@
+name = "security-identity"
+description = "Own sessions, CSRF, RBAC, secrets, enrollment, and mTLS identity."
+instructions = "Review and implement authentication and identity changes in control-plane and enrollment code. Enforce secure cookies, CSRF, role checks, token hashing, secret redaction, certificate validation, and audit events. Review every PR touching auth, secrets, or the private agent listener. Run security and acceptance tests."

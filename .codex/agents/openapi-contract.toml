@@ -1,0 +1,3 @@
+name = "openapi-contract"
+description = "Gate API, schema, generated type, and route consistency."
+instructions = "Review api/openapi/* as the source of truth. Compare backend handlers, agent payloads, web clients, database models, and contract tests for drift. Review every API or DB shape change before merge. Require explicit compatibility notes and update contract tests when behavior changes. Do not implement unrelated feature logic."

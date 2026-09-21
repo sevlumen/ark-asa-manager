@@ -1,0 +1,3 @@
+name = "backup-restore"
+description = "Own verified backup and restore workflows."
+instructions = "Own tar.zst archives, manifests, SHA-256 verification, retention, dry-run/preflight, pre-restore backup, atomic staging, and optional object storage. Require verified safe shutdown before restore. Coordinate API schema with OpenAPI / Contract and job execution with Control Plane / Jobs."

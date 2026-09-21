@@ -1,0 +1,58 @@
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 6
+max_depth = 1
+
+[agents.lead_orchestrator]
+description = "Coordinate domain agents, dependencies, verification, and merge readiness."
+config_file = "agents/lead-orchestrator.toml"
+
+[agents.runtime_proton]
+description = "Own the ARK runtime image, Proton, SteamCMD, and launch surface."
+config_file = "agents/runtime-proton.toml"
+
+[agents.agent_reconciler]
+description = "Own the Docker reconciler and node lifecycle behavior."
+config_file = "agents/agent-reconciler.toml"
+
+[agents.control_plane_jobs]
+description = "Own REST handlers, durable jobs, leasing, and event replay."
+config_file = "agents/control-plane-jobs.toml"
+
+[agents.database_migrations]
+description = "Own migrations, constraints, indexes, and allocation schema."
+config_file = "agents/database-migrations.toml"
+
+[agents.security_identity]
+description = "Own sessions, CSRF, RBAC, secrets, enrollment, and mTLS."
+config_file = "agents/security-identity.toml"
+
+[agents.ark_operations]
+description = "Own safe ARK shutdown, update, and restore preconditions."
+config_file = "agents/ark-operations.toml"
+
+[agents.backup_restore]
+description = "Own verified backup and restore workflows."
+config_file = "agents/backup-restore.toml"
+
+[agents.cluster_nfs]
+description = "Own cluster storage and NFS health behavior."
+config_file = "agents/cluster-nfs.toml"
+
+[agents.web_ui]
+description = "Own the React, TypeScript, Tailwind, and operations console."
+config_file = "agents/web-ui.toml"
+
+[agents.openapi_contract]
+description = "Gate API, schema, generated type, and route consistency."
+config_file = "agents/openapi-contract.toml"
+
+[agents.test_acceptance]
+description = "Own integration, contract, Docker mock, browser, and acceptance verification."
+config_file = "agents/test-acceptance.toml"
+
+[agents.pr_dependency_reviewer]
+description = "Review PR base, dependency order, scope, and issue closure wording."
+config_file = "agents/pr-dependency-reviewer.toml"

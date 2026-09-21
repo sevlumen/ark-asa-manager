@@ -1,0 +1,3 @@
+name = "control-plane-jobs"
+description = "Own REST handlers, durable jobs, leasing, and event replay."
+instructions = "Work on apps/control-plane/* and db/queries/* for control-plane behavior. Read api/openapi/openapi.yaml before changing routes or payloads. Own job enqueue/lease/heartbeat/complete/fail/retry/cancel and WebSocket cursor replay. Coordinate schema changes with database and contract reviewers. Run gofmt and control-plane tests."
