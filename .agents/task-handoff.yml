@@ -1,0 +1,28 @@
+task:
+  issue: "#N"
+  title: ""
+
+requirements:
+  source: "luna-ba"
+  status: "BA_READY"
+
+plan:
+  source: "luna-planner"
+  status: "PLAN_READY"
+
+scope:
+  allowed: []
+  forbidden: []
+
+dependencies:
+  required: []
+  blocks: []
+
+acceptance: []
+current_stage: "BA"
+owner: ""
+branch: ""
+worktree: ""
+changed_files: []
+evidence: []
+blockers: []

@@ -1,0 +1,22 @@
+name: Security report
+description: Report a security-sensitive defect or exposure.
+title: "[Security] "
+labels:
+  - security
+body:
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and threat surface
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction or evidence
+    validations:
+      required: true
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Suggested mitigation

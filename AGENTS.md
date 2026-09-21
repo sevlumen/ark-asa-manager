@@ -41,3 +41,5 @@ Bootstrap from `.env.example` using `scripts/bootstrap.sh` or `scripts/bootstrap
 ## Domain Agent Coordination
 
 Domain ownership and cross-agent gates are defined in [`docs/AGENT-DOMAIN-MATRIX.md`](docs/AGENT-DOMAIN-MATRIX.md). Role layers live in `.codex/agents/`. Keep feature changes inside one primary domain, record cross-domain dependencies in the PR, and run OpenAPI / Contract review before merging API or schema changes.
+
+The required delivery pipeline is documented in [`docs/agent-workflow.md`](docs/agent-workflow.md). Use `.agents/task-handoff.yml` for durable handoffs and the `luna-ba → luna-planner → luna-dev → luna-qc → luna-reviewer → luna-release` gates. Add `luna-security` for security-sensitive changes and call specialists only when their domain is involved.

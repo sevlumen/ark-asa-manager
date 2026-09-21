@@ -1,0 +1,29 @@
+name: Feature / requirement
+description: Propose a scoped feature with acceptance criteria.
+title: "[P?] "
+body:
+  - type: textarea
+    id: requirement
+    attributes:
+      label: Requirement
+      description: Describe the user or operational outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: List in-scope and out-of-scope behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: "- [ ] "
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and risks
