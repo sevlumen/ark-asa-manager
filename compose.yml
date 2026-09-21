@@ -141,14 +141,17 @@ services:
       ARK_MAP: ${ARK_MAP:-TheIsland_WP}
       ARK_PORT: ${ARK_PORT:-7777}
       ARK_QUERY_PORT: ${ARK_QUERY_PORT:-27015}
+      ARK_RCON_ENABLED: ${ARK_RCON_ENABLED:-false}
       ARK_RCON_PORT: ${ARK_RCON_PORT:-32330}
       ARK_MAX_PLAYERS: ${ARK_MAX_PLAYERS:-10}
       ARK_CLUSTER_ID: ${ARK_CLUSTER_ID:-local-cluster}
       ARK_SERVER_NAME: ${ARK_SERVER_NAME:-ARK ASA TheIsland}
-      ARK_ADMIN_PASSWORD: ${ARK_ADMIN_PASSWORD:-change-admin-password}
+      ARK_ADMIN_PASSWORD_FILE: ${ARK_ADMIN_PASSWORD_FILE:-}
+      ARK_SERVER_PASSWORD_FILE: ${ARK_SERVER_PASSWORD_FILE:-}
       ARK_PVE: ${ARK_PVE:-true}
       ARK_CROSSPLAY: ${ARK_CROSSPLAY:-true}
       ARK_BATTLEYE: ${ARK_BATTLEYE:-true}
+      ARK_DISABLE_GAME_ANALYTICS: ${ARK_DISABLE_GAME_ANALYTICS:-true}
       ARK_UPDATE_ON_START: ${ARK_UPDATE_ON_START:-true}
       STEAM_USER: ${STEAM_USER:-anonymous}
       STEAM_PASSWORD: ${STEAM_PASSWORD:-}
@@ -162,7 +165,6 @@ services:
     ports:
       - "${ARK_PORT:-7777}:${ARK_PORT:-7777}/udp"
       - "${ARK_QUERY_PORT:-27015}:${ARK_QUERY_PORT:-27015}/udp"
-      - "${ARK_RCON_PORT:-32330}:${ARK_RCON_PORT:-32330}/tcp"
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh"]
       interval: 30s

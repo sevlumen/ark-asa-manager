@@ -12,6 +12,10 @@ function Assert-Contains([string]$Text, [string]$Needle, [string]$Message) {
     if (-not $Text.Contains($Needle)) { $failures.Add($Message) }
 }
 
+function Assert-NotContains([string]$Text, [string]$Needle, [string]$Message) {
+    if ($Text.Contains($Needle)) { $failures.Add($Message) }
+}
+
 Assert-Contains $dockerfile 'ARG PROTON_SHA256=' 'Proton checksum build argument is missing.'
 Assert-Contains $dockerfile 'ARG STEAMCMD_SHA256=' 'SteamCMD checksum build argument is missing.'
 Assert-Contains $dockerfile 'ARG PROTON_VERSION=GE-Proton10-34' 'Runtime must use the tested GE-Proton version.'
@@ -40,6 +44,7 @@ Assert-Contains $entrypoint '-crossplay' 'Crossplay must be enabled.'
 Assert-Contains $entrypoint 'ARK_PVE' 'PvE must be configurable.'
 Assert-Contains $entrypoint 'ARK_CROSSPLAY' 'Crossplay must be configurable.'
 Assert-Contains $entrypoint 'ARK_BATTLEYE' 'BattlEye must be configurable.'
+Assert-Contains $entrypoint 'NoGameAnalytics' 'Game Analytics must be disableable for dedicated runtime deployments.'
 Assert-Contains $entrypoint 'NoBattlEye' 'BattlEye must be enabled unless explicitly disabled.'
 Assert-Contains $entrypoint 'if [[ "${ARK_UPDATE_ON_START:-true}" == "true" ]]; then' 'ARK_UPDATE_ON_START=false must not install missing game files.'
 Assert-Contains $entrypoint 'STEAM_COMPAT_DATA_PATH' 'Proton must have a persistent compat data path.'
@@ -52,7 +57,13 @@ Assert-Contains $entrypoint 'Xvfb' 'The entrypoint must start the virtual displa
 Assert-Contains $entrypoint 'WINEDLLOVERRIDES' 'The ASA Proton launch must configure the Windows DLL overrides.'
 Assert-Contains $entrypoint '-game' 'The ASA server launch must include the game mode flag.'
 Assert-Contains $entrypoint 'ARK_INSTALL_VCREDIST' 'VC++ redistributable installation must be configurable.'
+Assert-Contains $entrypoint 'proton run /opt/ark/vc_redist.x64.exe' 'VC++ installation must bootstrap a missing Proton prefix.'
+Assert-Contains $entrypoint 'write_ark_passwords_config' 'ARK passwords must be written to the runtime config instead of process argv.'
+Assert-Contains $entrypoint 'config/WindowsServer/GameUserSettings.ini' 'ARK password config must target the Proton ASA WindowsServer config path.'
+Assert-NotContains $entrypoint 'server_query+="?ServerAdminPassword=' 'Admin password must not be passed through the server process argv.'
+Assert-NotContains $entrypoint 'server_query+="?ServerPassword=' 'Server password must not be passed through the server process argv.'
 Assert-Contains $entrypoint 'runinprefix' 'The VC++ redistributable must be installed into the persistent Proton prefix.'
+Assert-Contains $entrypoint 'mkdir -p "$WINEPREFIX/dosdevices"' 'The Proton prefix drive mapping directory must exist before runinprefix.'
 Assert-Contains $entrypoint 'vcruntime140.dll' 'VC++ installation must be idempotent against the persistent prefix.'
 Assert-Contains $entrypoint 'sdk64' 'Proton must have a native Steam SDK search directory.'
 Assert-Contains $entrypoint 'steamclient.so' 'The native Steam client library must be linked for Proton.'
@@ -76,6 +87,7 @@ Assert-Contains $compose '10001:10001' 'Runtime volume ownership must target the
 Assert-Contains $compose 'max-size' 'Runtime logs must have rotation limits.'
 Assert-Contains $compose 'ARK_MEMORY_LIMIT' 'Runtime memory limit must be configurable.'
 Assert-Contains $compose 'ARK_START_PERIOD' 'Runtime start period must cover first game installation.'
+Assert-Contains $compose 'ARK_DISABLE_GAME_ANALYTICS' 'Compose must expose the Game Analytics setting.'
 Assert-Contains $compose 'seccomp=unconfined' 'umu pressure-vessel requires an unconfined seccomp profile.'
 Assert-Contains $compose 'apparmor=unconfined' 'umu pressure-vessel requires an unconfined AppArmor profile.'
 
