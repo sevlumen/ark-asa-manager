@@ -136,10 +136,15 @@ if ($copyEnrollmentCA -lt 0 -or $copyEnrollmentCA -lt $lastTLSReset) {
 }
 
 $consumeToken = $enrollmentHandler.IndexOf('UPDATE node_enrollments SET consumed_at=now()')
+$tokenPrecheck = $enrollmentHandler.IndexOf('SELECT node_id FROM node_enrollments')
 $signerRead = $enrollmentHandler.IndexOf('os.ReadFile(certFile)')
+if ($tokenPrecheck -lt 0 -or $signerRead -lt 0 -or $tokenPrecheck -gt $signerRead) {
+    $failures.Add('Enrollment must reject invalid tokens before doing CA signer work.')
+}
 if ($consumeToken -lt 0 -or $signerRead -lt 0 -or $consumeToken -lt $signerRead) {
     $failures.Add('Enrollment tokens must not be consumed before the signer is readable and ready.')
 }
+Assert-Contains $enrollmentHandler 'pg_advisory_xact_lock(hashtext(''ark-active-admins''))' 'Admin updates must serialize last-active-admin protection.'
 
 if ($failures.Count -gt 0) {
     throw ($failures -join [Environment]::NewLine)

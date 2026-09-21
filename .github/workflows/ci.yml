@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.23'
+
+      - name: Test control plane
+        working-directory: apps/control-plane
+        run: go test ./...
+
+      - name: Test agent
+        working-directory: apps/agent
+        run: go test ./...
+
+      - name: Test CLI
+        working-directory: cmd/arkctl
+        run: go test ./...
+
+      - name: Test OpenAPI contracts
+        working-directory: tests/contracts
+        env:
+          GOWORK: off
+        run: go test ./...
+
+      - name: Build web console
+        working-directory: apps/web
+        run: bun install --frozen-lockfile && bun run build.ts
+
+      - name: Validate runtime contracts
+        shell: pwsh
+        run: ./tests/runtime/runtime_contract.ps1
+
+      - name: Validate Compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-only-postgres-password
+          ADMIN_USERNAME: admin
+        run: docker compose config --quiet
